@@ -96,6 +96,35 @@ static void Path_ShowInFileExplorer(const Path path) {
   SDL_OpenURL(folder_url);
 }
 
+#pragma mark - File utils
+
+enum FileType {
+  FILETYPE_UNKNOWN,
+  FILETYPE_SOUNDBANK,
+  FILETYPE_HST,
+  FILETYPE_HOS,
+  FILETYPE_WAV,
+};
+
+static enum FileType GetFileType(const Path path) {
+  String ext;
+  if (!Path_GetExtension(path, ext))
+    return false;
+  
+  SDL_strlwr(ext);
+  if (SDL_strcmp(ext, ".hxd") == 0) return FILETYPE_SOUNDBANK;
+  if (SDL_strcmp(ext, ".hxc") == 0) return FILETYPE_SOUNDBANK;
+  if (SDL_strcmp(ext, ".hxg") == 0) return FILETYPE_SOUNDBANK;
+  if (SDL_strcmp(ext, ".hx2") == 0) return FILETYPE_SOUNDBANK;
+  if (SDL_strcmp(ext, ".hx3") == 0) return FILETYPE_SOUNDBANK;
+  if (SDL_strcmp(ext, ".hxx") == 0) return FILETYPE_SOUNDBANK;
+  if (SDL_strcmp(ext, ".hst") == 0) return FILETYPE_HST;
+  if (SDL_strcmp(ext, ".hos") == 0) return FILETYPE_HOS;
+  if (SDL_strcmp(ext, ".wav") == 0) return FILETYPE_WAV;
+  if (SDL_strcmp(ext, ".wave") == 0) return FILETYPE_WAV;
+  return FILETYPE_UNKNOWN;
+}
+
 #pragma mark - Application
 
 
