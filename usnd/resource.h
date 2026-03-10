@@ -7,19 +7,6 @@ extern "C" {
 
 #include "common.h"
 
-typedef u64 usnd_uuid;
-#define USND_INVALID_UUID 0
-#define USND_UUID_LOW(u) ((u) & 0xFFFFFFFF)
-#define USND_UUID_HIGH(u) ((u) >> 32)
-/* Get the group of a UUID, which is the high part
- * of the UUID's low part, e.g. 00000001xxxx00A3 */
-#define USND_UUID_GROUP(u) (USND_UUID_LOW(u)>>16)
-#define USND_UUID_MAX_GROUPS 0xFFFF
-
-/* Hardcoded UUIDs for ThemeProgram and ThemeActor */
-#define USND_THEMEPROGRAM_UUID 0x2ACA41B9C9138EA1
-#define USND_THEMEACTOR_UUID   0x2ACB403911EC579D
-
 /* An event the game calls to start,
  * stop or modify playback of sounds. */
 struct CEventResData {
@@ -55,8 +42,6 @@ struct CSwitchResData {
   u32 num_elements;
   struct CSwitchElement *elements;
 };
-
-#pragma mark - Program
 
 struct CProgramHeader {
   u32 header_size;
@@ -173,31 +158,6 @@ struct CResData {
   };
 };
 
-#pragma mark - Bank index
-
-struct CRefObjectLanguage {
-  usnd_language language;
-  usnd_uuid uuid;
-  u32 unknown;
-};
-
-struct CRefObjectCont {
-  u32 num_references;
-  u32 num_languages;
-  /* FIXME: probably not great to have this on the stack */
-  usnd_uuid references[USND_MAX_LINKS];
-  struct CRefObjectLanguage languages[USND_MAX_LANGUAGES];
-};
-
-struct CIdObjInfo {
-  enum usnd_class type;
-  usnd_uuid uuid;
-  u32 offset;
-  u32 size;
-  char *filename;
-  struct CRefObjectCont refobj;
-};
-
 #pragma mark - Object
 
 typedef u8 CWaveFileIdObjFlags;
@@ -235,6 +195,32 @@ struct CSndVar {
     void *structure;
     void *object;
   };
+};
+
+
+#pragma mark - Index
+
+struct CRefObjectLanguage {
+  usnd_language language;
+  usnd_uuid uuid;
+  u32 unknown;
+};
+
+struct CRefObjectCont {
+  u32 num_references;
+  u32 num_languages;
+  /* FIXME: probably not great to have this on the stack */
+  usnd_uuid references[USND_MAX_LINKS];
+  struct CRefObjectLanguage languages[USND_MAX_LANGUAGES];
+};
+
+struct CIdObjInfo {
+  enum usnd_class type;
+  usnd_uuid uuid;
+  u32 offset;
+  u32 size;
+  char *filename;
+  struct CRefObjectCont refobj;
 };
 
 #ifdef __cplusplus

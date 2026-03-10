@@ -33,6 +33,7 @@ typedef u32 usnd_size;
 
 u16 usnd_bswap16(u16);
 u32 usnd_bswap32(u32);
+usnd_endian usnd_test_endian(const u32 *data, u32 maxval);
 
 #pragma mark - Types
 
@@ -67,6 +68,18 @@ enum usnd_class {
   /* and over 100 more classes... */
   USND_CLASS_MAX
 };
+
+typedef u64 usnd_uuid;
+#define USND_INVALID_UUID 0
+#define USND_UUID_LOW(u) ((u) & 0xFFFFFFFF)
+#define USND_UUID_HIGH(u) ((u) >> 32)
+/* Get the group of a UUID, which is the high part
+ * of the UUID's low part, e.g. 00000001xxxx00A3 */
+#define USND_UUID_GROUP(u) (USND_UUID_LOW(u)>>16)
+#define USND_UUID_MAX_GROUPS 0xFFFF
+/* Hardcoded UUIDs for ThemeProgram and ThemeActor */
+#define USND_THEMEPROGRAM_UUID 0x2ACA41B9C9138EA1
+#define USND_THEMEACTOR_UUID   0x2ACB403911EC579D
 
 typedef u32 usnd_event_type;
 #define USND_EVENT_PLAY         0
@@ -154,6 +167,11 @@ int S_u16(usnd_flow*, u16*);
 int S_u32(usnd_flow*, u32*);
 int S_f32(usnd_flow*, f32*);
 int S_string(usnd_flow*, char**);
+int S_uuid(usnd_flow*, usnd_uuid*);
+
+#pragma mark - Utils
+
+#define USND_FOURCC(S) (u32)((S[3]<<24) | (S[2]<<16) | (S[1]<<8) | S[0])
 
 #ifdef __cplusplus
 }

@@ -21,6 +21,12 @@ struct CRTTIClass {
   };
 };
 
+const char *const usnd_class_name(enum usnd_class);
+enum usnd_class usnd_get_class(const char *name);
+enum usnd_class usnd_parent_class(enum usnd_class);
+enum usnd_class usnd_general_class(enum usnd_class);
+int usnd_instance_of(enum usnd_class child, enum usnd_class parent);
+
 #pragma mark - Soundbank
 
 typedef struct usnd_soundbank usnd_soundbank;

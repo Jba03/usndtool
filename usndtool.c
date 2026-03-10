@@ -21,7 +21,28 @@ static bool Quit = false;
 static SDL_Window *Window = NULL;
 static SDL_Renderer *Renderer = NULL;
 
+static void *usnd_realloc(void *mem, usnd_size size) {
+  return SDL_realloc(mem, (size_t)size);
+}
+
 SDL_AppResult SDL_AppInit(void **state, int argc, char **argv) {
+  if (argc > 1) {
+    const char *filename = argv[1];
+    
+    size_t size;
+    void *data = SDL_LoadFile(filename, &size);
+    
+    usnd_size wanted_size = usnd_soundbank_loaded_size((usnd_size)size);
+    
+    usnd_arena arena = {};
+    arena.size = wanted_size;
+    arena.base = SDL_malloc(wanted_size);
+    
+    usnd_soundbank *bank = usnd_soundbank_load(&arena, data, (usnd_size)size);
+    
+  }
+  
+  
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO))
     return SDL_APP_FAILURE;
   
