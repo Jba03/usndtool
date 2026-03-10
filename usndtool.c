@@ -1,10 +1,6 @@
 /* usndtool: Tool for editing 'HarmonX' soundbank files */
 /* Created by Jba03 initially on 2024-07-02 */
 
-#if !defined(USNDTOOL_VERSION_STRING)
-# define USNDTOOL_VERSION_STRING "unknown_version"
-#endif
-
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL.h>
@@ -14,12 +10,94 @@
 #include "cimgui/cimgui.h"
 #include "cimgui/cimgui_impl.h"
 
+#if !defined(USNDTOOL_VERSION_STRING)
+# define USNDTOOL_VERSION_STRING "unknown_version"
+#endif
+
 #include "usnd/usnd.h"
 #include "usnd/audio.h"
+
+#define STRING_MAX USND_STRING_MAX
+typedef char String[STRING_MAX];
+
+#define PATH_MAX 1024
+typedef char Path[PATH_MAX];
 
 static bool Quit = false;
 static SDL_Window *Window = NULL;
 static SDL_Renderer *Renderer = NULL;
+
+#pragma mark - Path
+
+#if !defined(WIN32)
+# define PATH_DELIMITER '/'
+#else
+# define PATH_DELIMITER '\\'
+#endif
+
+static void Path_Copy(Path dst, const Path src) {
+  SDL_strlcpy(dst, src, PATH_MAX);
+}
+
+static void Path_Append(Path dst, const Path src) {
+  Path tmp = {};
+  Path_Copy(tmp, dst);
+  SDL_snprintf(dst, PATH_MAX, "%s%c%s", tmp, PATH_DELIMITER, src);
+}
+
+static bool Path_GetExtension(const Path path, Path ext) {
+  const char *p = SDL_strrchr(path, '.');
+  if (p == NULL)
+    return false;
+  SDL_strlcpy(ext, p, PATH_MAX);
+  return true;
+}
+
+static bool Path_RemoveExtension(Path path) {
+  char *p = SDL_strrchr(path, '.');
+  if (!p) return false;
+  *p = '\0';
+  return true;
+}
+
+static bool Path_GetFilename(const Path path, String name) {
+  const char *p0 = SDL_strrchr(path, PATH_DELIMITER);
+  const char *p1 = SDL_strrchr(path, '.');
+  if (!p0 || !p1)
+    return false;
+  SDL_strlcpy(name, p0+1, SDL_max(p1-p0-1, USND_STRING_MAX-1));
+  return true;
+}
+
+static void Path_RemoveFilename(Path path) {
+  char* p = SDL_strrchr(path, PATH_DELIMITER);
+  if (p && SDL_strlen(p) > 1) *(p+1) = '\0';
+}
+
+static bool Path_GetParentPath(const Path path, Path out) {
+  SDL_strlcpy(out, path, PATH_MAX);
+  Path_RemoveFilename(out);
+  char* p = SDL_strrchr(out, PATH_DELIMITER);
+  if (!p) return false;
+  *(p+1) = '\0';
+  return true;
+}
+
+static void Path_FixUp(Path path) {
+  for (u32 i = 0; i < PATH_MAX; i++) {
+    if (path[i] == '\0') break;
+    if (path[i] == '\\') path[i] = PATH_DELIMITER;
+  }
+}
+
+static void Path_ShowInFileExplorer(const Path path) {
+  Path folder_url = {};
+  SDL_snprintf(folder_url, PATH_MAX, "file://%s", path);
+  SDL_OpenURL(folder_url);
+}
+
+#pragma mark - Application
+
 
 static void *usnd_realloc(void *mem, usnd_size size) {
   return SDL_realloc(mem, (size_t)size);
