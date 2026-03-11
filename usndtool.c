@@ -26,6 +26,7 @@ typedef char Path[PATH_MAX];
 static bool Quit = false;
 static SDL_Window *Window = NULL;
 static SDL_Renderer *Renderer = NULL;
+static struct Project *Project = NULL;
 
 /* General options */
 static Path Opt_ProjectsDir;
@@ -41,6 +42,80 @@ static float Opt_AudioMasterPan = 0.0f;
 static bool  Opt_AudioRepeat = false;
 static bool  Opt_AudioAllowRandomness = true;
 static u32   Opt_AudioDefaultLanguage = USND_LANGUAGE_ENGLISH;
+
+#pragma mark - UUID
+
+/* Default prefix for completely random UUIDs */
+#define UUID_DEFAULT_PREFIX 0xA0
+/* Default UUID group for new non-wavefile entries */
+#define UUID_DEFAULT_GROUP 0x0A10
+
+static void UUID_ToString(usnd_uuid uuid, String s) {
+  SDL_snprintf(s, USND_STRING_MAX, "%016llX", uuid);
+}
+
+static bool UUID_FromString(const String s, usnd_uuid *uuid) {
+  if (SDL_sscanf(s, "%016llX", uuid) != 1)
+    return false;
+  return true;
+}
+
+static usnd_uuid UUID_GetRandom(void) {
+  u64 hi = (u64)SDL_rand_bits() << 32;
+  u64 lo = (u64)SDL_rand_bits();
+  return hi^lo;
+}
+
+#pragma mark - Common functions
+
+static void GetEntryUUID(const usnd_entry *obj, char *string) {
+  const u32 lo = USND_UUID_LOW(obj->uuid);
+  const u32 hi = USND_UUID_HIGH(obj->uuid);
+  const u16 group = USND_UUID_GROUP(obj->uuid);
+  if (Opt_CompactUUIDs)
+    UUID_ToString(obj->uuid, string);
+  else
+    SDL_snprintf(string, USND_STRING_MAX, "%08X-%04X-%04X", hi, group, lo & 0xFFFF);
+}
+
+static void GetEntryName(const usnd_entry *obj, char *name) {
+  if (usnd_instance_of(obj->type, CResData) && obj->resource.name)
+    SDL_strlcpy(name, obj->resource.name, USND_STRING_MAX);
+  else
+    GetEntryUUID(obj, name);
+}
+
+static int GetEntryVersion(const usnd_entry *entry) {
+  if (usnd_instance_of(entry->type, CResData))
+    return entry->resource.version;
+  if (usnd_instance_of(entry->type, CWaveFileIdObj))
+    return entry->wavefile.version;
+  return -1;
+}
+
+static const char* LanguageCode_ToString(usnd_language l) {
+  if (l == USND_LANGUAGE_GERMAN) return "German";
+  if (l == USND_LANGUAGE_ENGLISH) return "English";
+  if (l == USND_LANGUAGE_SPANISH) return "Spanish";
+  if (l == USND_LANGUAGE_FRENCH) return "French";
+  if (l == USND_LANGUAGE_ITALIAN) return "Italian";
+  return "English";
+}
+
+static usnd_language LanguageCode_FromString(const String s) {
+  if (!SDL_strcmp(s, "German")) return USND_LANGUAGE_GERMAN;
+  if (!SDL_strcmp(s, "English")) return USND_LANGUAGE_ENGLISH;
+  if (!SDL_strcmp(s, "Spanish")) return USND_LANGUAGE_SPANISH;
+  if (!SDL_strcmp(s, "French")) return USND_LANGUAGE_FRENCH;
+  if (!SDL_strcmp(s, "Italian")) return USND_LANGUAGE_ITALIAN;
+  return USND_LANGUAGE_ENGLISH;
+}
+
+static bool IsPlayable(const usnd_entry *e) {
+  if (e->type == CActorResData) return false;
+  if (e->uuid == USND_THEMEPROGRAM_UUID) return false;
+  return true;
+}
 
 #pragma mark - Path
 
@@ -138,12 +213,6 @@ static enum FileType GetFileType(const Path path) {
   if (SDL_strcmp(ext, ".wav") == 0) return FILETYPE_WAV;
   if (SDL_strcmp(ext, ".wave") == 0) return FILETYPE_WAV;
   return FILETYPE_UNKNOWN;
-}
-
-#pragma mark - Memory utils
-
-static void *usnd_realloc(void *mem, usnd_size size) {
-  return SDL_realloc(mem, (size_t)size);
 }
 
 #pragma mark - Soundbank -
@@ -291,6 +360,10 @@ static usnd_entry* Project_Find(struct Project *p, usnd_uuid uuid) {
   return NULL;
 }
 
+#define Project_ForEach(p, entry) \
+  for (u32 _i = 0; (p) && _i < (p)->num_entries && \
+  (entry = ((p)->entries[_i].bank->handle->entries[(p)->entries[_i].index])); _i++)
+
 static int Project_AddBank(struct Project *p, SoundBank *bank) {
   if (p->num_banks + 1 >= PROJECT_MAX_BANKS) {
     SDL_Log("Failed to add bank to project: maximum number of banks reached");
@@ -298,8 +371,18 @@ static int Project_AddBank(struct Project *p, SoundBank *bank) {
   }
   
   p->banks[p->num_banks++] = bank;
-  for (u32 i = 0; i < bank->handle->num_entries; i++)
+  for (u32 i = 0; i < bank->handle->num_entries; i++) {
+    usnd_entry *entry = bank->handle->entries[i];
+    /* If the entry already exists in the project,
+     * mark it as shared across multiple banks. */
+    usnd_entry *found = Project_Find(p, entry->uuid);
+    if (found) {
+      entry->flags |= USND_ENTRY_FLAG_SHARED;
+      found->flags |= USND_ENTRY_FLAG_SHARED;
+    }
+    
     Project_PutEntry(p, bank, i);
+  }
   
   return 1;
 }
@@ -342,14 +425,117 @@ static struct Project* Project_LoadFromSoundFolder(const Path dir) {
   return project;
 }
 
+#pragma mark - Project search
+
+#define SEARCH_MAX_RESULTS 20000
+
+enum SearchMode {
+  SEARCH_MODE_ALL_ENTRIES,
+  SEARCH_MODE_SHARED_ENTRIES,
+  SEARCH_MODE_UNIQUE_ENTRIES,
+};
+
+typedef u16 SearchGroup;
+#define SEARCH_GROUP_ANY (u16)(-1)
+
+struct SearchContext {
+  enum SearchMode mode;
+  u64 class_flags;
+  SoundBank *bank;
+  SearchGroup group;
+  String query;
+  usnd_entry *results[SEARCH_MAX_RESULTS];
+  u32 num_results;
+};
+
+SDL_COMPILE_TIME_ASSERT(MaxClassFlags, USND_CLASS_MAX < 64);
+
+static bool SearchFilter(struct SearchContext *s, const usnd_entry *e) {
+  for (enum usnd_class c = 0; c < USND_CLASS_MAX; c++) {
+    if ((s->class_flags & (1 << c)) && usnd_instance_of(e->type, c)) {
+      /* Filter by bank */
+      if (s->bank && !SoundBank_Find(s->bank, e->uuid)) return false;
+      /* Filter by group */
+      if (s->group != SEARCH_GROUP_ANY && USND_UUID_GROUP(e->uuid) != s->group) return false;
+      /* Filter by uniqueness */
+      bool is_shared = (e->flags & USND_ENTRY_FLAG_SHARED);
+      if (s->mode == SEARCH_MODE_SHARED_ENTRIES && !is_shared) return false;
+      if (s->mode == SEARCH_MODE_UNIQUE_ENTRIES && is_shared) return false;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool SearchString(const String string, const String query) {
+  size_t len = SDL_strlen(query);
+  for (u32 n = 0; n < SDL_strlen(string); n++)
+    if (!SDL_strncmp(string+n, query, len)) return true;
+  return false;
+}
+
+void SearchContext_Clear(struct SearchContext *s) {
+  SDL_memset(s, 0, sizeof(*s));
+  s->mode = SEARCH_MODE_ALL_ENTRIES;
+  s->group = SEARCH_GROUP_ANY;
+  s->class_flags = 1 << CRTTIClass;
+}
+
+static bool SearchContext_DoSearch(struct SearchContext *s) {
+  String query = {};
+  SDL_strlcpy(query, s->query, USND_STRING_MAX);
+  SDL_strlwr(query);
+  
+  usnd_entry *entry = NULL;
+  s->num_results = 0;
+  
+  Project_ForEach(Project, entry) {
+    if (SearchFilter(s, entry)) {
+      String name = {};
+      String uuid = {};
+      String split_uuid = {};
+      /* Test name + default and split uuid formats */
+      GetEntryName(entry, name);
+      GetEntryUUID(entry, split_uuid);
+      UUID_ToString(entry->uuid, uuid);
+      
+      SDL_strlwr(name);
+      SDL_strlwr(uuid);
+      SDL_strlwr(split_uuid);
+      
+      if (s->num_results+1 >= SEARCH_MAX_RESULTS)
+        return false;
+      
+      if (SearchString(name, query))
+        s->results[s->num_results++] = entry;
+      else if (SearchString(uuid, query))
+        s->results[s->num_results++] = entry;
+      else if (SearchString(split_uuid, query))
+        s->results[s->num_results++] = entry;
+    }
+  }
+  
+  return true;
+}
+
+
 #pragma mark - UI -
 
 #define ImVec2(x,y)       (ImVec2){x,y}
 #define ImVec4(x,y,z,w)   (ImVec4){x,y,z,w}
 #define ImColor(x,y,z,w)  (ImVec4){x/255.0f,y/255.0f,z/255.0f,w/255.0f}
 
-static bool UI_WantsLayout = true;
+#define UI_SELECTION_MAX 32
+
+static usnd_entry *UI_Selection[UI_SELECTION_MAX];
+static usnd_entry *UI_ContextMenuTarget;
+static usnd_entry *UI_PopupTarget;
+
+static struct SearchContext UI_FixedSearch;
+static struct SearchContext UI_PopupSearch;
+
 static ImGuiID UI_MainDockspaceID;
+static bool UI_WantsLayout = true;
 
 /* Global shortcuts */
 static const ImGuiKeyChord UI_UndoKeyChord = ImGuiMod_Ctrl | ImGuiKey_Z;
@@ -358,13 +544,68 @@ static const ImGuiKeyChord UI_AudioPauseKeyChord = ImGuiKey_Space;
 static const ImGuiKeyChord UI_QuickSearchKeyChord = ImGuiMod_Ctrl | ImGuiKey_F;
 static const ImGuiKeyChord UI_QueueResetKeyChord = ImGuiMod_Ctrl | ImGuiKey_R;
 
-#pragma mark - UI Element
+#pragma mark - UI common
 
-static bool UI_DrawButtonBase(ImVec2 *size, ImVec4 text, ImVec4 bg, bool arrow) {
+static usnd_entry *UI_GetPrimarySelection(void) {
+  u32 n = UI_SELECTION_MAX;
+  while (--n)
+  if (UI_Selection[n])
+    return UI_Selection[n];
+  return *UI_Selection;
+}
+
+static ImVec4 UI_GetEntryColor(const usnd_entry *e) {
+  switch (usnd_general_class(e->type)) {
+    case CEventResData: {
+      /* Visually, this looks good enough. Probably preferable */
+      /* to choose similar colors based on the uuid group though. */
+      const struct CResData *res = &e->resource;
+      if (res->name && SDL_strlen(res->name) > 7) {
+        float r = 4.0f * (res->name[5] / 255.0f);
+        float b = 3.0f * (res->name[7] / 255.0f);
+        return ImVec4(0.5f, 0.5f*r, 1.0f*b, 1.0f);
+      }
+      break;
+    }
+    
+    case CRandomResData:
+      return ImVec4(0.4f, 0.7f, 0.8f, 1.0f);
+
+    case CProgramResData:
+      if (e->uuid == USND_THEMEPROGRAM_UUID)
+        return ImVec4(0.66f, 0.4f, 1.0f, 1.0f);
+      else return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+
+    case CWavResData:
+      return ImVec4(0.7f, 0.8f, 1.0f, 0.9f);
+
+    case CWaveFileIdObj:
+      return ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+
+    case CActorResData:
+      return ImVec4(0.5f, 0.35f, 1.0f, 1.0f);
+
+    default:
+      break;
+  }
+  
+  return ImVec4(1.0f, 1.0f, 1.0f, 0.5f);
+}
+
+#pragma mark - UI Elements
+
+enum UI_ButtonType {
+  UI_ButtonType_Play,
+  UI_ButtonType_Pause,
+  UI_ButtonType_Stop,
+  UI_ButtonType_Modify
+};
+
+static bool UI_DrawButtonBase(ImVec2 *size, ImVec4 color, ImVec4 bg, bool arrow) {
   if (size->x == 0 && size->y == 0) *size = ImVec2(15, 15);
-  igPushStyleColor_Vec4(ImGuiCol_Text, text);
+  igPushStyleColor_Vec4(ImGuiCol_Text, arrow ? color : ImVec4(0,0,0,0));
   igPushStyleColor_Vec4(ImGuiCol_Button, bg);
-  bool pressed = arrow ? igArrowButtonEx("##", ImGuiDir_Right, *size, 0) : igButtonEx("##", *size, 0);
+  bool pressed = igArrowButtonEx("##", ImGuiDir_Right, *size, 0);
   igPopStyleColor(2);
   if (igIsItemHovered(ImGuiHoveredFlags_None))
     igSetMouseCursor(ImGuiMouseCursor_Hand);
@@ -415,12 +656,195 @@ static bool UI_DrawStopButton(ImVec2 size, bool active) {
   return pressed;
 }
 
+static bool UI_DrawButton(enum UI_ButtonType type, ImVec2 size, bool active) {
+  if (type == UI_ButtonType_Play)
+    return UI_DrawPlayButton(size);
+  else if (type == UI_ButtonType_Pause)
+    return UI_DrawPauseButton(size);
+  else if (type == UI_ButtonType_Stop)
+    return UI_DrawStopButton(size, active);
+  else if (type == UI_ButtonType_Modify)
+    ;
+  return true;
+}
+
+
+static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
+{
+  igPushStyleVar_Vec2(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+  
+  
+  igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 0.0f);
+  igSetNextItemWidth(-0.000001f); /* don't ask */
+  if (igInputTextWithHint("##Search", "Search entry...", s->query,
+    USND_STRING_MAX, ImGuiInputTextFlags_None, NULL, NULL))
+  {
+    SearchContext_DoSearch(s);
+  }
+  igPopStyleVar(1);
+  
+  bool selected = false;
+  if (*selection == NULL && s->results[0])
+    *selection = s->results[0];
+  
+  igPushStyleVar_Vec2(ImGuiStyleVar_ItemInnerSpacing, ImVec2(3.0f, 0.0f));
+  ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY;
+  if (igBeginTable("##EntryTabl", 2, table_flags, ImVec2(0.0f, 0.0f), 1.0f))
+  {
+    igTableSetupColumn("##Action", ImGuiTableColumnFlags_WidthFixed, -1, 0);
+    igTableSetupColumn("##Name", ImGuiTableColumnFlags_WidthStretch, -1, 0);
+    
+    ImGuiListClipper clipper = {};
+    ImGuiListClipper_Begin(&clipper, s->num_results, 17.0f);
+    while (ImGuiListClipper_Step(&clipper))
+    {
+      for (u32 i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
+      {
+        usnd_entry *e = s->results[i];
+        String name = {};
+        GetEntryName(e, name);
+        
+        igTableNextRow(ImGuiTableRowFlags_None, 0.0f);
+        igTableNextColumn();
+        igSetCursorPosX(5.0f);
+        
+        igPushID_Ptr(e);
+        if (IsPlayable(e)) {
+          enum UI_ButtonType type = UI_ButtonType_Play;
+          if (e->type == CEventResData) {
+            if (e->resource.event.type == USND_EVENT_STOP) {
+              usnd_entry *entry = NULL;
+              type = UI_ButtonType_Stop;
+            } else if (e->resource.event.type != USND_EVENT_PLAY)
+              type = UI_ButtonType_Modify;
+          }
+          
+          UI_DrawButton(type, ImVec2(0,0), false);
+          
+        } else {
+          igDummy(ImVec2(0.0f, 0.0f));
+        }
+        igPopID();
+        
+        
+        igTableNextColumn();
+        
+        ImVec4 color = UI_GetEntryColor(e);
+        if (e == *selection) {
+          color = ImVec4(1.0f, 0.8f, 0.1f, 1.0f);
+          ImVec4 bg = color;
+          bg.w = 0.1f;
+          igTableSetBgColor(ImGuiTableBgTarget_CellBg, igColorConvertFloat4ToU32(bg), -1);
+        }
+        
+        igPushStyleColor_Vec4(ImGuiCol_Text, color);
+        
+        /* Entry */
+        igPushID_Ptr(e);
+        if (igSelectable_Bool(name, false, ImGuiSelectableFlags_SpanAvailWidth, ImVec2(0.0f, 0.0f))) {
+          *selection = e;
+          selected = true;
+        }
+        igPopID();
+        
+        /* object info select  */
+        if (igIsItemHovered(0)) {
+          igSetMouseCursor(ImGuiMouseCursor_Hand);
+        }
+        
+        if (igIsItemClicked(ImGuiMouseButton_Left)) {
+          *selection = e;
+        }
+        
+        if (igIsItemClicked(ImGuiMouseButton_Right)) {
+          UI_ContextMenuTarget = e;
+        }
+        
+        /* drag-drop source */
+        if (igBeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+          String name = {};
+          GetEntryName(e, name);
+          const char *class_name = usnd_class_name(usnd_general_class(e->type));
+          igSetDragDropPayload(class_name, &e->uuid, sizeof(usnd_uuid*), ImGuiCond_Always);
+          
+          igButton(name, ImVec2(0.0f, 0.0f));
+          igEndDragDropSource();
+        }
+        
+        igSameLine(0.0f, 0.0f);
+      
+        
+        if (e->flags & USND_ENTRY_FLAG_SHARED) {
+          igBullet();
+        }
+        
+        igPopStyleColor(1);
+      }
+    }
+    
+    igEndTable();
+  }
+//  igEndTable();
+  igPopStyleVar(2);
+  
+  return selected;
+}
+
+
 #pragma mark - UI Panel
 
 static void UI_DrawEntries(void) {
-  igBegin("Entries", NULL, ImGuiWindowFlags_None);
-  
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+  if (igBegin("Entries", NULL, ImGuiWindowFlags_MenuBar) && Project) {
+    struct SearchContext *search = &UI_FixedSearch;
+    igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, ImVec2(5,5));
+    if (igBeginMenuBar()) {
+      if (igBeginMenu("Filter", true)) {
+        if (igBeginMenu("Type", true)) {
+          u64 previous = search->class_flags;
+          igCheckboxFlags_U64Ptr("Any",            &search->class_flags, 1 << CRTTIClass);
+          if (search->class_flags & (1 << CRTTIClass)) igBeginDisabled(true);
+          igCheckboxFlags_U64Ptr("EventResData",   &search->class_flags, 1 << CEventResData);
+          igCheckboxFlags_U64Ptr("RandomResData",  &search->class_flags, 1 << CRandomResData);
+          igCheckboxFlags_U64Ptr("ProgramResData", &search->class_flags, 1 << CProgramResData);
+          igCheckboxFlags_U64Ptr("SwitchResData",  &search->class_flags, 1 << CSwitchResData);
+          igCheckboxFlags_U64Ptr("ActorResData",   &search->class_flags, 1 << CActorResData);
+          igCheckboxFlags_U64Ptr("WavResData",     &search->class_flags, 1 << CWavResData);
+          igCheckboxFlags_U64Ptr("WaveFileIdObj",  &search->class_flags, 1 << CWaveFileIdObj);
+          if (search->class_flags & (1 << CRTTIClass)) igEndDisabled();
+          if (search->class_flags != previous) SearchContext_DoSearch(search);
+          igEndMenu();
+        }
+        
+        if (igBeginMenu("Bank", true)) {
+          igPushStyleVar_Vec2(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 2.0f));
+          if (igRadioButton_Bool("Any", !search->bank)) {
+            search->bank = NULL;
+            SearchContext_DoSearch(search);
+          }
+          
+          igPopStyleVar(1);
+          igEndMenu();
+        }
+        igEndMenu();
+      }
+    }
+    
+    igTextColored(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), "(%d)", search->num_results);
+    if (igIsItemHovered(ImGuiHoveredFlags_None) && Project) {
+      igSetTooltip("%d entries total across banks", Project->num_entries);
+    }
+    
+    igEndMenuBar();
+   
+    igPopStyleVar(1);
+    
+    if (UI_DrawEntryTable(&UI_FixedSearch, &UI_Selection[0])) {
+      UI_Selection[1] = NULL;
+    }
+  }
   igEnd();
+  igPopStyleVar(1);
 }
 
 static void UI_DrawEntryInfo(void) {
@@ -651,6 +1075,16 @@ static void UI_Draw(void) {
   UI_HandleGlobalShortcuts();
 }
 
+static bool UI_Init(void) {
+  SearchContext_Clear(&UI_FixedSearch);
+  SearchContext_Clear(&UI_PopupSearch);
+  
+  UI_FixedSearch.class_flags |= (1 << CRTTIClass);
+  SearchContext_DoSearch(&UI_FixedSearch);
+  
+  return true;
+}
+  
 #pragma mark - Application
 
 extern void ImGui_ImplSDLRenderer3_Init(SDL_Renderer*);
@@ -660,7 +1094,7 @@ extern void ImGui_ImplSDLRenderer3_RenderDrawData(ImDrawData*, SDL_Renderer*);
 SDL_AppResult SDL_AppInit(void **state, int argc, char **argv) {
   if (argc > 1) {
     const char *dir_name = argv[1];
-    struct Project *project = Project_LoadFromSoundFolder(dir_name);
+    Project = Project_LoadFromSoundFolder(dir_name);
   }
   
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
@@ -691,6 +1125,11 @@ SDL_AppResult SDL_AppInit(void **state, int argc, char **argv) {
   
   ImGui_ImplSDLRenderer3_Init(Renderer);
     
+  if (!UI_Init()) {
+    SDL_Log("UI failed to initialize\n");
+    return SDL_APP_FAILURE;
+  }
+  
   return SDL_APP_CONTINUE;
 }
 

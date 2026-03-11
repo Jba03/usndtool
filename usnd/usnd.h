@@ -8,9 +8,16 @@ extern "C" {
 #include "common.h"
 #include "resource.h"
 
+typedef u32 usnd_entry_flags;
+#define USND_ENTRY_FLAG_FIX     (1 << 0) /* in fixed memory */
+#define USND_ENTRY_FLAG_LEVEL   (1 << 1) /* in level memory */
+#define USND_ENTRY_FLAG_TRANSIT (1 << 2) /* in transition memory */
+#define USND_ENTRY_FLAG_SHARED  (1 << 3) /* shared across multiple banks */
+
 typedef struct CRTTIClass usnd_entry;
 struct CRTTIClass {
   enum usnd_class type;
+  usnd_entry_flags flags;
   /* CIdObj */
   struct {
     usnd_uuid uuid;

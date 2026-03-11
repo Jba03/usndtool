@@ -32,9 +32,9 @@ static struct {
   [CActorResData]     = {"CActorResData",     CResData,       S_CActorResData   },
   /* .......................................................................... */
   [CWavResData]       = {"CWavResData",       CResData,       S_CWavResData     },
-  [CPCWavResData]     = {"CPCWavResData",     CResData,       S_CWavResData     },
-  [CPS2WavResData]    = {"CPS2WavResData",    CResData,       S_CWavResData     },
-  [CGCWavResData]     = {"CGCWavResData",     CResData,       S_CWavResData     },
+  [CPCWavResData]     = {"CPCWavResData",     CWavResData,    S_CWavResData     },
+  [CPS2WavResData]    = {"CPS2WavResData",    CWavResData,    S_CWavResData     },
+  [CGCWavResData]     = {"CGCWavResData",     CWavResData,    S_CWavResData     },
   /* .......................................................................... */
   [CWaveFileIdObj]    = {"CWaveFileIdObj",    CRefIdObj,      S_CWaveFileIdObj  },
   [CPCWaveFileIdObj]  = {"CPCWaveFileIdObj",  CWaveFileIdObj, S_CWaveFileIdObj  },
@@ -70,6 +70,14 @@ enum usnd_class usnd_general_class(enum usnd_class c) {
     case CGCWaveFileIdObj: return CWaveFileIdObj;
     default: return c;
   }
+}
+
+int usnd_instance_of(enum usnd_class child, enum usnd_class parent) {
+  while (child != CRTTIClass || !(child == parent == CRTTIClass)) {
+    if (child == parent) return 1;
+    child = usnd_parent_class(child);
+  }
+  return 0;
 }
 
 #pragma mark - Index
