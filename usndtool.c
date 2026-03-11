@@ -27,6 +27,21 @@ static bool Quit = false;
 static SDL_Window *Window = NULL;
 static SDL_Renderer *Renderer = NULL;
 
+/* General options */
+static Path Opt_ProjectsDir;
+static bool Opt_DrawVisualizer = true;
+static bool Opt_DrawSyncMarkers = true;
+static bool Opt_DrawDebugger = false;
+static bool Opt_DrawTimeline = false;
+static bool Opt_CompactUUIDs = true;
+
+/* Audio options */
+static float Opt_AudioMasterGain = 1.0f;
+static float Opt_AudioMasterPan = 0.0f;
+static bool  Opt_AudioRepeat = false;
+static bool  Opt_AudioAllowRandomness = true;
+static u32   Opt_AudioDefaultLanguage = USND_LANGUAGE_ENGLISH;
+
 #pragma mark - Path
 
 #if !defined(WIN32)
@@ -327,21 +342,273 @@ static struct Project* Project_LoadFromSoundFolder(const Path dir) {
   return project;
 }
 
+#pragma mark - UI -
+
+#define ImVec2(x,y)       (ImVec2){x,y}
+#define ImVec4(x,y,z,w)   (ImVec4){x,y,z,w}
+#define ImColor(x,y,z,w)  (ImVec4){x/255.0f,y/255.0f,z/255.0f,w/255.0f}
+
+static bool UI_WantsLayout = true;
+static ImGuiID UI_MainDockspaceID;
+
+/* Global shortcuts */
+static const ImGuiKeyChord UI_UndoKeyChord = ImGuiMod_Ctrl | ImGuiKey_Z;
+static const ImGuiKeyChord UI_RedoKeyChord = ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z;
+static const ImGuiKeyChord UI_AudioPauseKeyChord = ImGuiKey_Space;
+static const ImGuiKeyChord UI_QuickSearchKeyChord = ImGuiMod_Ctrl | ImGuiKey_F;
+static const ImGuiKeyChord UI_QueueResetKeyChord = ImGuiMod_Ctrl | ImGuiKey_R;
+
+
+static void UI_DrawEntries(void) {
+  igBegin("Entries", NULL, ImGuiWindowFlags_None);
+  
+  igEnd();
+}
+
+static void UI_DrawEntryInfo(void) {
+  igBegin("EntryInfo", NULL, ImGuiWindowFlags_None);
+  
+  igEnd();
+}
+
+static void UI_DrawEntryTree(void) {
+  igBegin("EntryTree", NULL, ImGuiWindowFlags_None);
+  
+  igEnd();
+}
+
+static void UI_DrawAudioPlayer(void) {
+  igBegin("AudioPlayer", NULL, ImGuiWindowFlags_None);
+  
+  igEnd();
+}
+
+static void UI_DrawPlaybackControls(void) {
+  igBegin("PlaybackControls", NULL, ImGuiWindowFlags_None);
+  
+  igEnd();
+}
+
+static void UI_DrawAudioQueue(void) {
+  igBegin("AudioQueue", NULL, ImGuiWindowFlags_None);
+  
+  igEnd();
+}
+
+static void UI_DrawPanels(void) {
+  UI_DrawEntries();
+  UI_DrawEntryInfo();
+  UI_DrawEntryTree();
+  UI_DrawAudioPlayer();
+  UI_DrawPlaybackControls();
+  UI_DrawAudioQueue();
+}
+
+static void UI_HandleGlobalShortcuts(void) {
+  
+}
+
+static void UI_DrawMainMenuBar(void) {
+  if (igBeginMainMenuBar()) {
+    if (igBeginMenu("File", true)) {
+      igMenuItem_BoolPtr("Quit", NULL, &Quit, true);
+      igEndMenu();
+    }
+    
+    if (igBeginMenu("Edit", true)) {
+      if (igMenuItem_Bool("Undo", "Ctrl+Z", false, false));
+      if (igMenuItem_Bool("Redo", "Ctrl+Shift+Z", false, false));
+      igSeparator();
+      if (igMenuItem_Bool("Find", "Ctrl+F", false, true));
+      
+      igEndMenu();
+    }
+    
+    if (igBeginMenu("Options", true)) {
+      if (igBeginMenu("Audio options", true)) {
+        if (igBeginMenu("Default language", true)) {
+          usnd_language *l = &Opt_AudioDefaultLanguage;
+          if (igMenuItem_Bool("German",  NULL, *l == USND_LANGUAGE_GERMAN, true)) *l = USND_LANGUAGE_GERMAN;
+          if (igMenuItem_Bool("English", NULL, *l == USND_LANGUAGE_ENGLISH, true)) *l = USND_LANGUAGE_ENGLISH;
+          if (igMenuItem_Bool("Spanish", NULL, *l == USND_LANGUAGE_SPANISH, true)) *l = USND_LANGUAGE_SPANISH;
+          if (igMenuItem_Bool("French",  NULL, *l == USND_LANGUAGE_FRENCH, true)) *l = USND_LANGUAGE_FRENCH;
+          if (igMenuItem_Bool("Italian", NULL, *l == USND_LANGUAGE_ITALIAN, true)) *l = USND_LANGUAGE_ITALIAN;
+          igEndMenu();
+        }
+       
+        igCheckbox("Allow randomness", &Opt_AudioAllowRandomness);
+        igSeparator();
+        igCheckbox("Draw sync markers", &Opt_DrawSyncMarkers);
+        igCheckbox("Draw visualizer", &Opt_DrawVisualizer);
+        
+        igEndMenu();
+      }
+      
+      if (igBeginMenu("Style options", true)) {
+        igCheckbox("Use compact UUIDs", &Opt_CompactUUIDs);
+        igEndMenu();
+      }
+        
+      igSeparator();
+      
+      igCheckbox("Draw timeline", &Opt_DrawTimeline);
+      igCheckbox("Draw debugger", &Opt_DrawDebugger);
+        
+      igEndMenu();
+    }
+    
+    /* version */
+    const char text[] = USNDTOOL_VERSION_STRING;
+    ImVec2 textsize = igCalcTextSize(text, text + sizeof(text), false, 0.0f);
+    igSetCursorScreenPos(ImVec2(igGetIO_Nil()->DisplaySize.x - textsize.x, 0));
+    igTextColored(ImVec4(1.0f, 1.0f, 1.0f, 0.1f), text);
+    
+    igEndMainMenuBar();
+  }
+}
+
+static void UI_DoStyle(void) {
+  ImGuiStyle *style = igGetStyle();
+  igStyleColorsDark(style);
+  
+  style->AntiAliasedFill = true;
+  style->AntiAliasedLines = true;
+  style->AntiAliasedLinesUseTex = true;
+  
+  style->FrameRounding  = 5.0f;
+  style->PopupRounding  = 5.0f;
+  style->GrabRounding   = 5.0f;
+  style->ChildRounding  = 5.0f;
+  style->WindowRounding = 5.5f;
+  style->CellPadding    = ImVec2(2.0f, 1.0f);
+  
+  style->FrameBorderSize      = 0.0f;
+  style->PopupBorderSize      = 1.0f;
+  style->WindowBorderSize     = 2.0f;
+  style->DockingSeparatorSize = 1.0f;
+  style->DisabledAlpha        = 0.25f;
+  
+  style->Colors[ImGuiCol_MenuBarBg]                 = ImColor(30, 30, 30, 255);
+  style->Colors[ImGuiCol_DockingEmptyBg]            = ImColor(5, 5, 5, 255);
+  style->Colors[ImGuiCol_WindowBg]                  = ImColor(12, 12, 16, 255);
+  style->Colors[ImGuiCol_TitleBg]                   = ImColor(20, 20, 20, 255);
+  style->Colors[ImGuiCol_TitleBgActive]             = ImColor(30, 30, 30, 255);
+  style->Colors[ImGuiCol_Border]                    = ImColor(45, 45, 45, 255);
+  style->Colors[ImGuiCol_BorderShadow]              = ImColor(55, 55, 55, 255);
+  style->Colors[ImGuiCol_PopupBg]                   = ImColor(30, 30, 30, 255);
+  style->Colors[ImGuiCol_Tab]                       = ImColor(15, 15, 15, 255);
+  style->Colors[ImGuiCol_TabDimmedSelected]         = ImColor(40, 40, 55, 255);
+  style->Colors[ImGuiCol_TabHovered]                = ImColor(60, 60, 75, 255);
+  style->Colors[ImGuiCol_TabSelected]               = ImColor(80, 80, 85, 255);
+  style->Colors[ImGuiCol_Header]                    = ImColor(65, 65, 65, 255);
+  style->Colors[ImGuiCol_HeaderHovered]             = ImColor(65, 65, 65, 255);
+  style->Colors[ImGuiCol_HeaderActive]              = ImColor(65, 65, 65, 255);
+  style->Colors[ImGuiCol_TableRowBg]                = ImColor(255, 255, 255, 2);
+  style->Colors[ImGuiCol_TableRowBgAlt]             = ImColor(255, 255, 255, 8);
+  style->Colors[ImGuiCol_Button]                    = ImColor(65, 65, 65, 255);
+  style->Colors[ImGuiCol_ChildBg]                   = ImColor(30, 30, 30, 50);
+  style->Colors[ImGuiCol_TabDimmedSelectedOverline] = ImColor(0,0,0,0);
+  style->Colors[ImGuiCol_TabSelectedOverline]       = ImColor(0,0,0,0);
+  style->Colors[ImGuiCol_CheckMark]                 = ImColor(50, 255, 180, 255);
+  style->Colors[ImGuiCol_FrameBg]                   = ImColor(80, 80, 80, 50);
+  style->Colors[ImGuiCol_ModalWindowDimBg]          = ImColor(15, 15, 20, 240);
+  style->Colors[ImGuiCol_ScrollbarBg]               = ImColor(0, 0, 0, 100);
+  
+  style->HoverDelayNormal = 0.25f;
+  style->HoverDelayShort = 0.25f;
+  style->HoverStationaryDelay = 0.15f;
+}
+
+static void UI_DoLayout(void) {
+  ImGuiDockNodeFlags flags = 0;
+  flags |= ImGuiDockNodeFlags_DockSpace;
+  flags |= ImGuiDockNodeFlags_NoDockingOverCentralNode;
+  
+  igDockBuilderRemoveNode(UI_MainDockspaceID);
+  igDockBuilderAddNode(UI_MainDockspaceID, flags);
+  igDockBuilderSetNodeSize(UI_MainDockspaceID, igGetMainViewport()->WorkSize);
+  
+  ImGuiID dock_main_id = UI_MainDockspaceID;
+  ImGuiID left0 = igDockBuilderSplitNode(UI_MainDockspaceID, ImGuiDir_Left, 1.0f/4.0f, NULL, &dock_main_id);
+  ImGuiID middle1 = dock_main_id;
+  ImGuiID bottom = igDockBuilderSplitNode(middle1, ImGuiDir_Down, 1.0f/2.7f, NULL, &middle1);
+  ImGuiID right = igDockBuilderSplitNode(middle1, ImGuiDir_Right, 1.0f/3.0f, NULL, &middle1);
+  ImGuiID middle2 = igDockBuilderSplitNode(middle1, ImGuiDir_Down, 1.0f/4.0f, NULL, &middle1);
+  ImGuiID right1 = igDockBuilderSplitNode(bottom, ImGuiDir_Right, 1.0/3.0f, NULL, &bottom);
+  
+  igDockBuilderDockWindow("Entries", left0);
+  igDockBuilderDockWindow("AudioPlayer", middle1);
+  igDockBuilderDockWindow("EntryInfo", right);
+  igDockBuilderDockWindow("PlaybackControls", middle2);
+  igDockBuilderDockWindow("AudioQueue", right1);
+  igDockBuilderDockWindow("EntryTree", bottom);
+  
+  igDockBuilderFinish(UI_MainDockspaceID);
+}
+
+static void UI_Draw(void) {
+  UI_DrawMainMenuBar();
+  
+  ImGuiViewport *viewport = igGetMainViewport();
+  igSetNextWindowPos(viewport->WorkPos, ImGuiCond_None, ImVec2(0.0f, 0.0f));
+  igSetNextWindowSize(viewport->WorkSize, ImGuiCond_None);
+  igSetNextWindowViewport(viewport->ID);
+  
+  ImGuiWindowFlags window_flags = 0;
+  window_flags |= ImGuiWindowFlags_NoDocking;
+  window_flags |= ImGuiWindowFlags_NoTitleBar;
+  window_flags |= ImGuiWindowFlags_NoCollapse;
+  window_flags |= ImGuiWindowFlags_NoResize;
+  window_flags |= ImGuiWindowFlags_NoMove;
+  window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus;
+  window_flags |= ImGuiWindowFlags_NoNavFocus;
+  window_flags |= ImGuiWindowFlags_NoDecoration;
+  
+  igPushStyleVar_Float(ImGuiStyleVar_WindowRounding, 0.0f);
+  igPushStyleVar_Float(ImGuiStyleVar_WindowBorderSize, 0.0f);
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+  
+  if (igBegin("DockSpace", NULL, window_flags)) {
+    ImGuiDockNodeFlags docknode_flags = 0;
+    docknode_flags |= ImGuiDockNodeFlags_PassthruCentralNode;
+    docknode_flags |= ImGuiDockNodeFlags_NoDocking;
+    docknode_flags |= ImGuiDockNodeFlags_NoTabBar;
+    docknode_flags |= ImGuiDockNodeFlags_NoResize;
+    
+    UI_MainDockspaceID = igGetID_Str("DockSpace");
+    igDockSpace(UI_MainDockspaceID, ImVec2(0.0f, 0.0f), docknode_flags, NULL);
+    
+    if (UI_WantsLayout) {
+      UI_WantsLayout = false;
+      UI_DoLayout();
+      UI_DoStyle();
+    }
+    
+    UI_DrawPanels();
+  }
+  igEnd();
+
+  igPopStyleVar(3);
+  
+  UI_HandleGlobalShortcuts();
+}
+
 #pragma mark - Application
+
+extern void ImGui_ImplSDLRenderer3_Init(SDL_Renderer*);
+extern void ImGui_ImplSDLRenderer3_NewFrame(void);
+extern void ImGui_ImplSDLRenderer3_RenderDrawData(ImDrawData*, SDL_Renderer*);
 
 SDL_AppResult SDL_AppInit(void **state, int argc, char **argv) {
   if (argc > 1) {
     const char *dir_name = argv[1];
-    
     struct Project *project = Project_LoadFromSoundFolder(dir_name);
-    return SDL_APP_FAILURE;
   }
   
-  
-  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO))
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
+    SDL_Log("Failed to initialize SDL: %s\n", SDL_GetError());
     return SDL_APP_FAILURE;
-  
-  SDL_SetAppMetadata("usndtool", USNDTOOL_VERSION_STRING, NULL);
+  }
   
   SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
   if (!SDL_CreateWindowAndRenderer("usndtool", 800, 500, flags, &Window, &Renderer)) {
@@ -349,13 +616,28 @@ SDL_AppResult SDL_AppInit(void **state, int argc, char **argv) {
     return SDL_APP_FAILURE;
   }
   
+  SDL_SetAppMetadata("usndtool", USNDTOOL_VERSION_STRING, NULL);
   SDL_SetWindowMinimumSize(Window, 800, 500);
   SDL_SetWindowPosition(Window, SDL_WINDOWPOS_CENTERED_DISPLAY(1), SDL_WINDOWPOS_CENTERED_DISPLAY(1));
   
+  if (!igCreateContext(NULL))
+    return SDL_APP_FAILURE;
+  
+  ImGuiIO* io = igGetIO_Nil();
+  io->BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+  io->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  io->ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+  
+  if (!ImGui_ImplSDL3_InitForSDLRenderer(Window, Renderer))
+    return SDL_APP_FAILURE;
+  
+  ImGui_ImplSDLRenderer3_Init(Renderer);
+    
   return SDL_APP_CONTINUE;
 }
 
-SDL_AppResult SDL_AppEvent(void *_, SDL_Event *evt) {
+SDL_AppResult SDL_AppEvent(void *state, SDL_Event *evt) {
+  ImGui_ImplSDL3_ProcessEvent(evt);
   switch (evt->type) {
     case SDL_EVENT_QUIT:
       return SDL_APP_SUCCESS;
@@ -372,10 +654,18 @@ SDL_AppResult SDL_AppEvent(void *_, SDL_Event *evt) {
   return SDL_APP_CONTINUE;
 }
 
-SDL_AppResult SDL_AppIterate(void*_) {
+SDL_AppResult SDL_AppIterate(void *state) {
   Uint64 start = SDL_GetTicks();
   
+  ImGui_ImplSDLRenderer3_NewFrame();
+  ImGui_ImplSDL3_NewFrame();
+  
+  igNewFrame();
+  UI_Draw();
+  igRender();
+  
   SDL_RenderClear(Renderer);
+  ImGui_ImplSDLRenderer3_RenderDrawData(igGetDrawData(), Renderer);
   SDL_RenderPresent(Renderer);
   
   const float delay = 1000.0f / 60.0f;
@@ -384,11 +674,12 @@ SDL_AppResult SDL_AppIterate(void*_) {
   
   if (Quit)
     return SDL_APP_SUCCESS;
-  else
-    return SDL_APP_CONTINUE;
+ 
+  return SDL_APP_CONTINUE;
 }
 
-void SDL_AppQuit(void*_, SDL_AppResult result) {
+void SDL_AppQuit(void *state, SDL_AppResult result) {
+  ImGui_ImplSDL3_Shutdown();
   SDL_DestroyRenderer(Renderer);
   SDL_DestroyWindow(Window);
   SDL_Quit();
