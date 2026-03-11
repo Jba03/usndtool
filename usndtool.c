@@ -358,6 +358,64 @@ static const ImGuiKeyChord UI_AudioPauseKeyChord = ImGuiKey_Space;
 static const ImGuiKeyChord UI_QuickSearchKeyChord = ImGuiMod_Ctrl | ImGuiKey_F;
 static const ImGuiKeyChord UI_QueueResetKeyChord = ImGuiMod_Ctrl | ImGuiKey_R;
 
+#pragma mark - UI Element
+
+static bool UI_DrawButtonBase(ImVec2 *size, ImVec4 text, ImVec4 bg, bool arrow) {
+  if (size->x == 0 && size->y == 0) *size = ImVec2(15, 15);
+  igPushStyleColor_Vec4(ImGuiCol_Text, text);
+  igPushStyleColor_Vec4(ImGuiCol_Button, bg);
+  bool pressed = arrow ? igArrowButtonEx("##", ImGuiDir_Right, *size, 0) : igButtonEx("##", *size, 0);
+  igPopStyleColor(2);
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+    igSetMouseCursor(ImGuiMouseCursor_Hand);
+  return pressed;
+}
+
+static bool UI_DrawPlayButton(ImVec2 size) {
+  ImVec4 color = ImVec4(0.25f, 1.0f, 0.43f, 0.75f);
+  ImVec4 bg_color = ImVec4(color.x, color.y, color.z, color.w * 0.2f);
+  return UI_DrawButtonBase(&size, color, bg_color, true);
+}
+
+static bool UI_DrawPauseButton(ImVec2 size) {
+  ImVec4 color = ImVec4(1.0f, 0.75f, 0.25f, 0.75f);
+  ImVec4 bg_color = ImVec4(color.x, color.y, color.z, color.w * 0.2f);
+  ImVec2 cursor = igGetCursorScreenPos();
+  bool pressed = UI_DrawButtonBase(&size, color, bg_color, false);
+  
+  ImDrawList *drawlist = igGetWindowDrawList();
+  ImVec2 p0 = ImVec2(cursor.x + size.x/4.0f + 1.0f, cursor.y + size.y/4.0f);
+  ImVec2 p1 = ImVec2(p0.x, p0.y + size.y/2.0f);
+  ImDrawList_AddLine(drawlist, p0, p1, igGetColorU32_Vec4(color), 2);
+  p0.x = cursor.x + size.x - size.x / 3.0-1;
+  p1.x = cursor.x + size.x - size.x / 3.0-1;
+  ImDrawList_AddLine(drawlist, p0, p1, igGetColorU32_Vec4(color), 2);
+  return pressed;
+}
+
+static bool UI_DrawStopButton(ImVec2 size, bool active) {
+  ImVec4 color = active ? ImVec4(0.0f, 0.75f, 1.0f, 0.75f) : ImVec4(0.25f, 0.5f, 1.0f, 0.75f);
+  ImVec4 bg_color = ImVec4(color.x, color.y, color.z, color.w * 0.2f);
+  ImVec2 cursor = igGetCursorScreenPos();
+  bool pressed = UI_DrawButtonBase(&size, color, bg_color, false);
+  
+  ImDrawList *drawlist = igGetWindowDrawList();
+  ImVec2 p0 = ImVec2(cursor.x + size.x / 4.0f, cursor.y + size.y / 4.0f);
+  ImVec2 p1 = ImVec2(p0.x + size.x/2.0f, p0.y + size.y/2.0f);
+  
+  ImU32 col = igGetColorU32_Vec4(color);
+  if (active)
+    ImDrawList_AddRectFilled(drawlist, p0, p1, col, 0.0f, 0);
+  else
+    ImDrawList_AddRect(drawlist, p0, p1, col, 1.0f, 0, 1.0f);
+  
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+    igSetMouseCursor(ImGuiMouseCursor_Hand);
+  
+  return pressed;
+}
+
+#pragma mark - UI Panel
 
 static void UI_DrawEntries(void) {
   igBegin("Entries", NULL, ImGuiWindowFlags_None);
