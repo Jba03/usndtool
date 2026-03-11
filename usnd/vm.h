@@ -5,7 +5,9 @@
 extern "C" {
 #endif
 
+#include "resource.h"
 
+usnd_size usnd_program_size(const struct CProgramHeader*);
 
 #ifdef __cplusplus
 }

@@ -126,6 +126,11 @@ struct CActorResData {
   u32 var_access;
 };
 
+typedef u8 CWavResDataFlags;
+#define CWavResDataFlags_0 (1 << 0)
+#define CWavResDataFlags_1 (1 << 1)
+#define CWavResDataFlags_2 (1 << 2)
+
 struct CWavResLink {
   usnd_language language;
   usnd_uuid uuid;
@@ -161,7 +166,8 @@ struct CResData {
 #pragma mark - Object
 
 typedef u8 CWaveFileIdObjFlags;
-#define CWaveFileIdObjFlags_ExternalStream (1 << 0)
+#define CWaveFileIdObjFlags_External  (1 << 0)
+#define CWaveFileIdObjFlags_Filetype  (1 << 1)
 
 /* Wavefile container object */
 struct CWaveFileIdObj {
