@@ -12,36 +12,35 @@ int S_CWaveFileIdObj(usnd_flow*, usnd_entry*);
 int S_CIdObj(usnd_flow*, usnd_entry*);
 int S_CRefIdObj(usnd_flow*, usnd_entry*);
 int S_CRTTIClass(usnd_flow*, usnd_entry*);
-int S_CIdObjInfo(usnd_flow*, struct CIdObjInfo*);
 
 #pragma mark -
 
-struct {
+static struct {
   const char* name;
   enum usnd_class base;
   int (*S)(usnd_flow*, usnd_entry*);
-} static class[] = {
-  [CRTTIClass]        = {"CRTTIClass",        CRTTIClass, S_CRTTIClass      },
-  [CIdObj]            = {"CIdObj",            CRTTIClass, S_CIdObj          },
-  [CRefIdObj]         = {"CRefIdObj",         CIdObj,     S_CRefIdObj       },
-  /* ...................................................................... */
-  [CResData]          = {"CResData",          CRefIdObj,  S_CResData        },
-  [CEventResData]     = {"CEventResData",     CResData,   S_CEventResData   },
-  [CRandomResData]    = {"CRandomResData",    CResData,   S_CRandomResData  },
-  [CProgramResData]   = {"CProgramResData",   CResData,   S_CProgramResData },
-  [CSwitchResData]    = {"CSwitchResData",    CResData,   S_CSwitchResData  },
-  [CActorResData]     = {"CActorResData",     CResData,   S_CActorResData   },
-  /* ...................................................................... */
-  [CWavResData]       = {"CWavResData",       CResData,   S_CWavResData     },
-  [CPCWavResData]     = {"CPCWavResData",     CResData,   S_CWavResData     },
-  [CPS2WavResData]    = {"CPS2WavResData",    CResData,   S_CWavResData     },
-  [CGCWavResData]     = {"CGCWavResData",     CResData,   S_CWavResData     },
-  /* ...................................................................... */
-  [CWaveFileIdObj]    = {"CWaveFileIdObj",    CResData,   S_CWavResData     },
-  [CPCWaveFileIdObj]  = {"CPCWaveFileIdObj",  CResData,   S_CWavResData     },
-  [CPS2WaveFileIdObj] = {"CPS2WaveFileIdObj", CResData,   S_CWavResData     },
-  [CGCWaveFileIdObj]  = {"CGCWaveFileIdObj",  CResData,   S_CWavResData     },
-  /* ...................................................................... */
+} class[] = {
+  [CRTTIClass]        = {"CRTTIClass",        CRTTIClass,     S_CRTTIClass      },
+  [CIdObj]            = {"CIdObj",            CRTTIClass,     S_CIdObj          },
+  [CRefIdObj]         = {"CRefIdObj",         CIdObj,         S_CRefIdObj       },
+  /* .......................................................................... */
+  [CResData]          = {"CResData",          CRefIdObj,      S_CResData        },
+  [CEventResData]     = {"CEventResData",     CResData,       S_CEventResData   },
+  [CRandomResData]    = {"CRandomResData",    CResData,       S_CRandomResData  },
+  [CProgramResData]   = {"CProgramResData",   CResData,       S_CProgramResData },
+  [CSwitchResData]    = {"CSwitchResData",    CResData,       S_CSwitchResData  },
+  [CActorResData]     = {"CActorResData",     CResData,       S_CActorResData   },
+  /* .......................................................................... */
+  [CWavResData]       = {"CWavResData",       CResData,       S_CWavResData     },
+  [CPCWavResData]     = {"CPCWavResData",     CResData,       S_CWavResData     },
+  [CPS2WavResData]    = {"CPS2WavResData",    CResData,       S_CWavResData     },
+  [CGCWavResData]     = {"CGCWavResData",     CResData,       S_CWavResData     },
+  /* .......................................................................... */
+  [CWaveFileIdObj]    = {"CWaveFileIdObj",    CRefIdObj,      S_CWaveFileIdObj  },
+  [CPCWaveFileIdObj]  = {"CPCWaveFileIdObj",  CWaveFileIdObj, S_CWaveFileIdObj  },
+  [CPS2WaveFileIdObj] = {"CPS2WaveFileIdObj", CWaveFileIdObj, S_CWaveFileIdObj  },
+  [CGCWaveFileIdObj]  = {"CGCWaveFileIdObj",  CWaveFileIdObj, S_CWaveFileIdObj  },
+  /* .......................................................................... */
   [USND_CLASS_MAX]    = { NULL }
 };
 
@@ -75,20 +74,23 @@ enum usnd_class usnd_general_class(enum usnd_class c) {
 
 #pragma mark - Index
 
-void S_CRefObjectLanguage(usnd_flow *flow, struct CRefObjectLanguage *lang) {
-  S_u32(flow, &lang->language);
-  S_u32(flow, &lang->unknown);
-  S_uuid(flow, &lang->uuid);
+int S_CRefObjectLanguage(usnd_flow *flow, struct CRefObjectLanguage *lang) {
+  if (!S_u32(flow, &lang->language)) return 0;
+  if (!S_u32(flow, &lang->unknown)) return 0;
+  if (!S_uuid(flow, &lang->uuid)) return 0;
+  return 1;
 }
 
-void S_CRefObjectCont(usnd_flow *flow, struct CRefObjectCont *refobj) {
-  S_u32(flow, &refobj->num_references);
+int S_CRefObjectCont(usnd_flow *flow, struct CRefObjectCont *refobj) {
+  if (!S_u32(flow, &refobj->num_references)) return 0;
   for (u32 i = 0; i < refobj->num_references; i++)
-    S_uuid(flow, &refobj->references[i]);
+    if (!S_uuid(flow, &refobj->references[i])) return 0;
   
-  S_u32(flow, &refobj->num_languages);
+  if (!S_u32(flow, &refobj->num_languages)) return 0;
   for (u32 i = 0; i < refobj->num_languages; i++)
-    S_CRefObjectLanguage(flow, &refobj->languages[i]);
+    if (!S_CRefObjectLanguage(flow, &refobj->languages[i])) return 0;
+  
+  return 1;
 }
 
 int S_CIdObjInfo(usnd_flow *flow, struct CIdObjInfo *info) {
@@ -97,14 +99,13 @@ int S_CIdObjInfo(usnd_flow *flow, struct CIdObjInfo *info) {
     return 0;
   
   info->type = usnd_get_class(classname);
-  S_uuid(flow, &info->uuid);
-  S_u32(flow, &info->offset);
-  S_u32(flow, &info->size);
-  S_string(flow, &info->filename);
-  S_CRefObjectCont(flow, &info->refobj);
+  if (!S_uuid(flow, &info->uuid)) return 0;
+  if (!S_u32(flow, &info->offset)) return 0;
+  if (!S_u32(flow, &info->size)) return 0;
+  if (!S_string(flow, &info->filename)) return 0;
+  if (!S_CRefObjectCont(flow, &info->refobj)) return 0;
   return 1;
 }
-
 
 int S_CRTTIClass(usnd_flow *flow, struct CRTTIClass *e) {
   char *classname = (char*)usnd_class_name(e->type);
@@ -135,6 +136,7 @@ usnd_soundbank *usnd_soundbank_load(usnd_arena *arena, u8 *data, usnd_size size)
   flow.endianness = usnd_test_endian((const u32*)data, size);
   flow.arena = arena;
   
+  usnd_arena_clear(arena);
   usnd_soundbank *bank = usnd_arena_push(arena, sizeof(usnd_soundbank));
   if (!bank)
     return NULL;

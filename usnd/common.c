@@ -1,5 +1,6 @@
 #include "common.h"
 
+#include <assert.h>
 #include <string.h>
 
 u16 usnd_bswap16(u16 x) {
@@ -26,27 +27,17 @@ usnd_endian usnd_test_endian(const u32 *data, u32 maxval) {
 
 void *usnd_arena_push(usnd_arena *arena, usnd_size size) {
   u32 aligned_size = USND_ALIGN(size, 4);
-  if (arena->position + aligned_size >= arena->size) {
-    if (!arena->realloc)
-      return NULL;
-    
-    u32 new_size = arena->size;
-    u32 requested_size = arena->position + aligned_size;
-    while (new_size < requested_size)
-      new_size *= USND_ARENA_GROWTH_FACTOR;
-    
-    u8 *new_base = arena->realloc(arena->base, new_size);
-    if (!new_base)
-      return NULL;
-    
-    memset(new_base + arena->position, 0, new_size - arena->position);
-    arena->base = new_base;
-    arena->size = new_size;
-  }
-  
+  assert(arena->position + aligned_size < arena->size && "arena out of space");
   void *p = arena->base + arena->position;
   arena->position += aligned_size;
   return p;
+}
+
+void *usnd_arena_pop(usnd_arena *arena, usnd_size size) {
+  u32 aligned_size = USND_ALIGN(size, 4);
+  assert((s64)arena->position - aligned_size >= 0 && "arena pos<0");
+  arena->position -= aligned_size;
+  return arena->base + arena->position;
 }
 
 void usnd_arena_reset(usnd_arena *arena, usnd_offset pos) {
@@ -70,12 +61,10 @@ void usnd_arena_clear(usnd_arena *arena) {
 
 void usnd_flow_seek(usnd_flow *flow, usnd_offset pos) {
   flow->pos = pos;
-  return 1;
 }
 
 void usnd_flow_advance(usnd_flow *flow, usnd_offset offset) {
   flow->pos += offset;
-  return 1;
 }
 
 void usnd_flow_rw(usnd_flow *flow, void *data, usnd_size size) {
@@ -88,28 +77,28 @@ void usnd_flow_rw(usnd_flow *flow, void *data, usnd_size size) {
 
 int S_u8(struct usnd_flow *flow, u8 *data) {
   usnd_flow_rw(flow, data, 1);
-  return *data;
+  return 1;
 }
 
 int S_u16(struct usnd_flow *flow, u16 *data) {
   u16 tmp; bswap(16, flow->mode == USND_WRITE)
   usnd_flow_rw(flow, data, 2); bswap(16, 1)
   memcpy(&tmp, data, sizeof(tmp));
-  return tmp;
+  return 1;
 }
 
 int S_u32(struct usnd_flow *flow, u32 *data) {
   u32 tmp; bswap(32, flow->mode == USND_WRITE)
   usnd_flow_rw(flow, data, 4); bswap(32, 1)
   memcpy(&tmp, data, sizeof(tmp));
-  return tmp;
+  return 1;
 }
 
 int S_f32(struct usnd_flow *flow, f32 *data) {
   f32 tmp; bswap(32, flow->mode == USND_WRITE)
   usnd_flow_rw(flow, data, 4); bswap(32, 1)
   memcpy(&tmp, data, sizeof(tmp));
-  return tmp;
+  return 1;
 }
 
 int S_string(usnd_flow *flow, char **s) {
@@ -137,7 +126,8 @@ int S_string(usnd_flow *flow, char **s) {
 }
 
 int S_uuid(usnd_flow *flow, usnd_uuid *uuid) {
-  u64 tmp, low, high;
+  u64 tmp;
+  u32 low, high;
   memcpy(&tmp, uuid, sizeof(tmp));
 
   low  = (u32)(tmp & 0xFFFFFFFF);
@@ -148,4 +138,5 @@ int S_uuid(usnd_flow *flow, usnd_uuid *uuid) {
 
   tmp = ((u64)high << 32) | low;
   memcpy(uuid, &tmp, sizeof(tmp));
+  return 1;
 }

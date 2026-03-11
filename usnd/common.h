@@ -127,17 +127,15 @@ typedef u32 usnd_language;
 
 #pragma mark - Memory
 
-typedef void* (*usnd_realloc_fn)(void*, usnd_size);
-
 typedef struct usnd_arena usnd_arena;
 struct usnd_arena {
   u8 *base;
   u32 size;
   u32 position;
-  usnd_realloc_fn realloc;
 };
 
 void *usnd_arena_push(usnd_arena*, usnd_size);
+void *usnd_arena_pop(usnd_arena*, usnd_size);
 void usnd_arena_reset(usnd_arena*, usnd_offset);
 void usnd_arena_clear(usnd_arena*);
 
