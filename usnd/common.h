@@ -144,12 +144,20 @@ const char *const usnd_version_name(enum usnd_version);
 
 #pragma mark - Memory
 
+typedef u32 usnd_arena_flags;
+#define USND_ARENA_FLAGS_DUMMY (1 << 0)
+
 typedef struct usnd_arena usnd_arena;
 struct usnd_arena {
+  usnd_arena_flags flags;
   u8 *base;
-  u32 size;
-  u32 position;
+  usnd_size size;
+  usnd_offset position;
+  u32 counter;
 };
+
+#define usnd_arena_alloc(data, data_size, flag) \
+  (usnd_arena){ .base = (data), .size = (data_size), .flags = (flag) }
 
 void *usnd_arena_push(usnd_arena*, usnd_size);
 void *usnd_arena_pop(usnd_arena*, usnd_size);

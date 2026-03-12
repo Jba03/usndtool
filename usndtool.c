@@ -282,14 +282,10 @@ static SoundBank* SoundBank_Load(const Path filepath) {
   }
   
   usnd_size original_size = (usnd_size)(size);
-  usnd_size required_size = usnd_soundbank_loaded_size(original_size);
+  usnd_size required_size = usnd_soundbank_loaded_size(data, original_size);
+  bank->arena = usnd_arena_alloc(SDL_malloc(required_size), required_size, 0);
   
-  usnd_arena *arena = &bank->arena;
-  arena->position = 0;
-  arena->size = required_size;
-  arena->base = SDL_malloc(required_size);
-  
-  if (!(bank->handle = usnd_soundbank_load(arena, data, original_size))) {
+  if (!(bank->handle = usnd_soundbank_load(&bank->arena, data, original_size))) {
     SDL_Log("Failed to read bank %s\n", filepath);
     goto fail;
   }
@@ -298,12 +294,15 @@ static SoundBank* SoundBank_Load(const Path filepath) {
   
   Path_Copy(bank->absolute_path, filepath);
   Path_GetFilename(filepath, bank->filename);
+  
+  printf("%s (%u -> %u, used = %u)\n", bank->filename, original_size, required_size, bank->arena.position);
+  
   return bank;
   
 fail:
   if (data) SDL_free(data);
   if (bank) SDL_free(bank);
-  if (arena->base) SDL_free(arena->base);
+  if (bank->arena.base) SDL_free(bank->arena.base);
   return NULL;
 }
 
@@ -568,9 +567,9 @@ static bool GetBanksForEntry(usnd_uuid uuid,
 #define ImVec4(x,y,z,w)   (ImVec4){x,y,z,w}
 #define ImColor(x,y,z,w)  (ImVec4){x/255.0f,y/255.0f,z/255.0f,w/255.0f}
 
-#define UI_SELECTION_MAX 32
+#define UI_MAX_SELECTIONS 32
 
-static usnd_entry *UI_Selection[UI_SELECTION_MAX];
+static usnd_entry *UI_Selection[UI_MAX_SELECTIONS];
 static usnd_entry *UI_ContextMenuTarget;
 static usnd_entry *UI_PopupTarget;
 
@@ -590,7 +589,7 @@ static const ImGuiKeyChord UI_QueueResetKeyChord = ImGuiMod_Ctrl | ImGuiKey_R;
 #pragma mark - UI common
 
 static usnd_entry *UI_GetPrimarySelection(void) {
-  u32 n = UI_SELECTION_MAX;
+  u32 n = UI_MAX_SELECTIONS;
   while (--n)
   if (UI_Selection[n])
     return UI_Selection[n];
@@ -707,8 +706,8 @@ static bool UI_DrawButton(enum UI_ButtonType type, ImVec2 size, bool active) {
   else if (type == UI_ButtonType_Stop)
     return UI_DrawStopButton(size, active);
   else if (type == UI_ButtonType_Modify)
-    ;
-  return true;
+    return UI_DrawStopButton(size, active);
+  SDL_assert(false);
 }
 
 static bool UI_ObjectSelector(const char *label,
@@ -761,10 +760,14 @@ static bool UI_ObjectSelector(const char *label,
   return b;
 }
 
-static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
-{
+static ImGuiID AdapterIndexToStorageId(ImGuiSelectionBasicStorage *s, int idx) {
+  usnd_entry **selection = s->UserData;
+  if (!selection[idx]) return 0;
+  return igImHashData(&selection[idx]->uuid, sizeof(usnd_uuid), 0);
+}
+
+static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection) {
   igPushStyleVar_Vec2(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-  
   
   igPushStyleVar_Float(ImGuiStyleVar_FrameRounding, 0.0f);
   igSetNextItemWidth(-0.000001f); /* don't ask */
@@ -779,10 +782,21 @@ static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
   if (*selection == NULL && s->results[0])
     *selection = s->results[0];
   
+  static ImGuiSelectionBasicStorage selection_storage = {};
+  selection_storage.UserData = s->results;
+  selection_storage.AdapterIndexToStorageId = AdapterIndexToStorageId;
+  
   igPushStyleVar_Vec2(ImGuiStyleVar_ItemInnerSpacing, ImVec2(3.0f, 0.0f));
   ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY;
   if (igBeginTable("##EntryTabl", 2, table_flags, ImVec2(0.0f, 0.0f), 1.0f))
   {
+    ImGuiMultiSelectFlags ms_flags = 0;
+    ms_flags |= ImGuiMultiSelectFlags_SelectOnClickRelease;
+    ms_flags |= ImGuiMultiSelectFlags_NoSelectOnRightClick;
+    ms_flags |= ImGuiMultiSelectFlags_ClearOnClickVoid;
+    
+    ImGuiMultiSelectIO *ms_io = igBeginMultiSelect(ms_flags, selection_storage.Size, s->num_results);
+    ImGuiSelectionBasicStorage_ApplyRequests(&selection_storage, ms_io);
     igTableSetupColumn("##Action", ImGuiTableColumnFlags_WidthFixed, -1, 0);
     igTableSetupColumn("##Name", ImGuiTableColumnFlags_WidthStretch, -1, 0);
     
@@ -822,7 +836,13 @@ static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
         igTableNextColumn();
         
         ImVec4 color = UI_GetEntryColor(e);
-        if (e == *selection) {
+//        if (e == *selection) {
+        
+        bool is_selected = ImGuiSelectionBasicStorage_Contains(
+          &selection_storage, igImHashData(&e->uuid, sizeof(usnd_uuid), 0));
+        is_selected |= (e == *selection);
+        
+        if (is_selected) {
           color = ImVec4(1.0f, 0.8f, 0.1f, 1.0f);
           ImVec4 bg = color;
           bg.w = 0.1f;
@@ -833,8 +853,8 @@ static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
         
         /* Entry */
         igPushID_Ptr(e);
-        if (igSelectable_Bool(name, false, ImGuiSelectableFlags_SpanAvailWidth, ImVec2(0.0f, 0.0f))) {
-          *selection = e;
+        igSetNextItemSelectionUserData(i);
+        if (igSelectable_Bool(name, false, ImGuiSelectableFlags_SelectOnNav, ImVec2(0.0f, 0.0f))) {
           selected = true;
         }
         igPopID();
@@ -853,13 +873,43 @@ static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
         }
         
         /* drag-drop source */
+//        if (igBeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+//          String name = {};
+//          GetEntryName(e, name);
+//          const char *class_name = usnd_class_name(usnd_general_class(e->type));
+//          igSetDragDropPayload(class_name, &e->uuid, sizeof(usnd_uuid*), ImGuiCond_Always);
+//          
+//          igButton(name, ImVec2(0.0f, 0.0f));
+//          igEndDragDropSource();
+//        }
+        
         if (igBeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-          String name = {};
-          GetEntryName(e, name);
-          const char *class_name = usnd_class_name(usnd_general_class(e->type));
-          igSetDragDropPayload(class_name, &e->uuid, sizeof(usnd_uuid*), ImGuiCond_Always);
+          usnd_uuid payload[UI_MAX_SELECTIONS];
+          SDL_memset(payload, 0, sizeof(payload));
+          u32 count = 0;
+
+          if (is_selected && selection_storage.Size > 1) {
+            for (int n = 0; n < selection_storage.Size; n++) {
+              usnd_entry **entries = selection_storage.UserData;
+//              ImGuiID id = USND_UUID_LOW(entries[n]->uuid);
+              payload[count++] = entries[n]->uuid;
+            }
+          } else {
+            /* Drag only the clicked item */
+            payload[count++] = e->uuid;
+          }
           
-          igButton(name, ImVec2(0.0f, 0.0f));
+          igSetDragDropPayload("$entries", payload,
+            sizeof(usnd_uuid) * count, ImGuiCond_Always);
+          
+          if (count == 1) {
+            String name = {};
+            GetEntryName(Project_Find(Project, payload[0]), name);
+            igText(name);
+          } else {
+            igText("%d entries", count);
+          }
+            
           igEndDragDropSource();
         }
         
@@ -873,9 +923,13 @@ static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
         igPopStyleColor(1);
       }
     }
+   
+    ms_io = igEndMultiSelect();
+    ImGuiSelectionBasicStorage_ApplyRequests(&selection_storage, ms_io);
     
     igEndTable();
   }
+  
 //  igEndTable();
   igPopStyleVar(2);
   
@@ -1000,7 +1054,8 @@ static void UI_DrawEntries(void) {
    
     igPopStyleVar(1);
     
-    if (UI_DrawEntryTable(&UI_FixedSearch, &UI_Selection[0])) {
+    static u32 num_selected = 0;
+    if (UI_DrawEntryTable(&UI_FixedSearch, UI_Selection)) {
       UI_Selection[1] = NULL;
     }
   }
@@ -1012,15 +1067,16 @@ static void UI_DrawEntryInfo(void) {
   usnd_entry *e = UI_GetPrimarySelection();
   igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, ImVec2(5,5));
   if (igBegin("EntryInfo", NULL, ImGuiWindowFlags_None) && Project && e) {
+    String uuid = {};
+    GetEntryUUID(e, uuid);
+    
     ImVec4 color0 = UI_GetEntryColor(e);
     ImVec4 color1 = color0;
     ImVec4 color2 = color0;
     color0.w = 1.0f;
     color1.w = 0.85f;
     color2.w = 0.7f;
-      
-    String uuid = {};
-    GetEntryUUID(e, uuid);
+    
     igTextColored(color0, uuid);
     igTextColored(color1, "%s", usnd_class_name(e->type));
 
@@ -1123,7 +1179,7 @@ static void UI_DrawMainMenuBar(void) {
       }
       
       if (igBeginMenu("Style options", true)) {
-        igCheckbox("Use compact UUIDs", &Opt_CompactUUIDs);
+        igCheckbox("Compact UUIDs", &Opt_CompactUUIDs);
         igEndMenu();
       }
         

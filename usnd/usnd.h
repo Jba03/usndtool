@@ -46,9 +46,9 @@ struct usnd_soundbank {
 
 /* Query the loaded size of a soundbank from its original size.
  * Returns the size to allocate for the arena to usnd_soundbank_load. */
-usnd_size usnd_soundbank_loaded_size(usnd_size original_size);
+usnd_size usnd_soundbank_loaded_size(u8 *data, usnd_size data_size);
 /* Load a soundbank into a pre-allocated arena. */
-usnd_soundbank *usnd_soundbank_load(usnd_arena*, u8 *data, usnd_size original_size);
+usnd_soundbank *usnd_soundbank_load(usnd_arena*, u8 *data, usnd_size data_size);
 
 usnd_entry *usnd_soundbank_find(usnd_soundbank*, usnd_uuid);
 int usnd_soundbank_add_entry(usnd_soundbank*, usnd_entry*);

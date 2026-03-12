@@ -126,20 +126,71 @@ int S_CRTTIClass(usnd_flow *flow, struct CRTTIClass *e) {
 
 #pragma mark - Soundbank
 
+#define USND_MEMORY_LESS
+
 /* Factor to account for extra alignment. */
 #define USND_ALLOCATION_FACTOR 1.075f
 
-usnd_size usnd_soundbank_loaded_size(usnd_size original_size) {
+usnd_size usnd_soundbank_loaded_size(u8 *data, usnd_size data_size) {
+  u8 arena_base[1024*4];
+  memset(arena_base, 0, sizeof(arena_base));
+  usnd_arena arena = usnd_arena_alloc(arena_base,
+    sizeof(arena_base), USND_ARENA_FLAGS_DUMMY);
+  usnd_arena_clear(&arena);
+  
+  usnd_flow flow = {};
+  flow.mode = USND_READ;
+  flow.buf = (u8*)data;
+  flow.size = data_size;
+  flow.endianness = usnd_test_endian((const u32*)data, data_size);
+  flow.arena = &arena;
+  
+  u32 index_offset = 0;
+  u32 index_code = 0;
+  u32 index_version = 0;
+  u32 num_entries = 0;
+  
+  S_u32(&flow, &index_offset);
+  usnd_flow_seek(&flow, index_offset);
+  S_u32(&flow, &index_code);
+  S_u32(&flow, &index_version);
+  S_u32(&flow, &num_entries);
+  
+  if (index_code != USND_FOURCC("INDX"))
+    return 0;
+  
+  for (u32 i = 0; i < num_entries; i++) {
+    struct CIdObjInfo index_entry = {};
+    if (!S_CIdObjInfo(&flow, &index_entry))
+      return NULL;
+    
+    usnd_offset index_next = flow.pos;
+    usnd_flow_seek(&flow, index_entry.offset);
+    
+    usnd_entry *entry = usnd_arena_push(&arena, sizeof(usnd_entry));
+    if (!S_CRTTIClass(&flow, entry))
+      return NULL;
+    
+    usnd_flow_seek(&flow, index_next);
+  }
+  
   usnd_size reserved_size = 0;
   reserved_size += sizeof(usnd_soundbank);
+  
+#if defined(USND_MEMORY_LESS)
+  reserved_size += num_entries * sizeof(usnd_entry*);
+#else
   reserved_size += USND_MAX_ENTRIES * sizeof(usnd_entry*);
-  return (reserved_size + original_size) * USND_ALLOCATION_FACTOR;
+#endif
+  
+  usnd_size bank_size = data_size + arena.counter * (4 - 1);
+  return reserved_size + bank_size;
 }
 
 usnd_soundbank *usnd_soundbank_load(usnd_arena *arena, u8 *data, usnd_size size) {
   usnd_flow flow = {};
   flow.mode = USND_READ;
-  flow.buf = data;
+  flow.buf = (u8*)data;
   flow.size = size;
   flow.endianness = usnd_test_endian((const u32*)data, size);
   flow.arena = arena;
@@ -163,7 +214,12 @@ usnd_soundbank *usnd_soundbank_load(usnd_arena *arena, u8 *data, usnd_size size)
   if (index_code != USND_FOURCC("INDX"))
     return NULL;
   
+#if defined(USND_MEMORY_LESS)
+  usnd_size entry_list_size = bank->num_entries * sizeof(usnd_entry*);
+#else
   usnd_size entry_list_size = USND_MAX_ENTRIES * sizeof(usnd_entry*);
+#endif
+  
   bank->entries = usnd_arena_push(arena, entry_list_size);
   if (!bank->entries)
     return NULL;
@@ -177,9 +233,6 @@ usnd_soundbank *usnd_soundbank_load(usnd_arena *arena, u8 *data, usnd_size size)
     usnd_flow_seek(&flow, index_entry.offset);
     
     usnd_entry *entry = usnd_arena_push(arena, sizeof(usnd_entry));
-    if (!entry)
-      return NULL;
-    
     if (!S_CRTTIClass(&flow, entry))
       return NULL;
     

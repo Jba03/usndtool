@@ -144,23 +144,27 @@ int S_CProgramResData(usnd_flow *flow, usnd_entry *e) {
   assert(header_size == 88);
   
   /* header */
+  struct CProgramHeader *header = program->header;
   if (flow->mode == USND_READ)
-    program->header = usnd_arena_push(flow->arena, sizeof(struct CProgramHeader));
-  if (!S_CProgramHeader(flow, program->header, e->resource.version))
+    header = usnd_arena_push(flow->arena, sizeof(struct CProgramHeader));
+  if (!S_CProgramHeader(flow, header, e->resource.version))
     return 0;
   
+  program->header = header;
+  
   /* code */
-  u32 code_size = usnd_program_size(program->header);
+  u32 code_size = usnd_program_size(header);
   if (flow->mode == USND_READ)
     program->code = usnd_arena_push(flow->arena, code_size);
-  usnd_flow_rw(flow, program->code, code_size);
+  
+  if (flow->arena->flags & USND_ARENA_FLAGS_DUMMY)
+    usnd_flow_advance(flow, code_size);
+  else
+    usnd_flow_rw(flow, program->code, code_size);
   
   /* small hack here (object vars?) */
   if (e->uuid == USND_THEMEPROGRAM_UUID)
     usnd_flow_advance(flow, 8);
-  
-  assert(code_size == program->header->fn_descriptor_pos +
-    program->header->fn_descriptor_size && "unexpected end of program");
   
   /* Links */
   S_vector(flow, &program->num_links, program->links, usnd_uuid, S_uuid);

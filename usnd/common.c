@@ -27,16 +27,30 @@ usnd_endian usnd_test_endian(const u32 *data, u32 maxval) {
 
 void *usnd_arena_push(usnd_arena *arena, usnd_size size) {
   u32 aligned_size = USND_ALIGN(size, 4);
-  assert(arena->position + aligned_size < arena->size && "arena out of space");
+  if (!(arena->flags & USND_ARENA_FLAGS_DUMMY))
+    assert(arena->position + aligned_size <= arena->size && "arena out of space");
   void *p = arena->base + arena->position;
   arena->position += aligned_size;
+  
+  ++arena->counter;
+  if (arena->flags & USND_ARENA_FLAGS_DUMMY) {
+    usnd_arena_clear(arena);
+    return arena->base;
+  }
+  
   return p;
 }
 
 void *usnd_arena_pop(usnd_arena *arena, usnd_size size) {
   u32 aligned_size = USND_ALIGN(size, 4);
-  assert((s64)arena->position - aligned_size >= 0 && "arena pos<0");
+  if (!(arena->flags & USND_ARENA_FLAGS_DUMMY))
+    assert((s64)arena->position - aligned_size >= 0 && "arena pos<0");
   arena->position -= aligned_size;
+  
+  --arena->counter;
+  if (arena->flags & USND_ARENA_FLAGS_DUMMY)
+    return arena->base;
+  
   return arena->base + arena->position;
 }
 
@@ -75,26 +89,26 @@ void usnd_flow_rw(usnd_flow *flow, void *data, usnd_size size) {
   flow->pos += size;
 }
 
-int S_u8(struct usnd_flow *flow, u8 *data) {
+int S_u8(usnd_flow *flow, u8 *data) {
   usnd_flow_rw(flow, data, 1);
   return 1;
 }
 
-int S_u16(struct usnd_flow *flow, u16 *data) {
+int S_u16(usnd_flow *flow, u16 *data) {
   u16 tmp; bswap(16, flow->mode == USND_WRITE)
   usnd_flow_rw(flow, data, 2); bswap(16, 1)
   memcpy(&tmp, data, sizeof(tmp));
   return 1;
 }
 
-int S_u32(struct usnd_flow *flow, u32 *data) {
+int S_u32(usnd_flow *flow, u32 *data) {
   u32 tmp; bswap(32, flow->mode == USND_WRITE)
   usnd_flow_rw(flow, data, 4); bswap(32, 1)
   memcpy(&tmp, data, sizeof(tmp));
   return 1;
 }
 
-int S_f32(struct usnd_flow *flow, f32 *data) {
+int S_f32(usnd_flow *flow, f32 *data) {
   f32 tmp; bswap(32, flow->mode == USND_WRITE)
   usnd_flow_rw(flow, data, 4); bswap(32, 1)
   memcpy(&tmp, data, sizeof(tmp));
@@ -116,8 +130,8 @@ int S_string(usnd_flow *flow, char **s) {
   if (!*s)
     return 0;
   
-  if (flow->mode == USND_READ)
-    memset(*s, '\0', len+1);
+//  if (flow->mode == USND_READ)
+//    memset(*s, '\0', len+1);
 
   usnd_flow_rw(flow, *s, len);
   (*s)[len] = '\0';
