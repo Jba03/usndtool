@@ -1,6 +1,8 @@
 #include "common.h"
 
 #include <assert.h>
+#include <stdalign.h>
+#include <stddef.h>
 #include <string.h>
 
 u16 usnd_bswap16(u16 x) {
@@ -25,8 +27,10 @@ usnd_endian usnd_test_endian(const u32 *data, u32 maxval) {
 #define USND_ARENA_GROWTH_FACTOR 1.2f
 #define USND_ALIGN(size, x) ((size) + ((x) - (size) % (x)) % (x))
 
+static const usnd_size USND_ALIGNMENT = alignof(intmax_t);
+
 void *usnd_arena_push(usnd_arena *arena, usnd_size size) {
-  u32 aligned_size = USND_ALIGN(size, 4);
+  u32 aligned_size = USND_ALIGN(size, USND_ALIGNMENT);
   if (!(arena->flags & USND_ARENA_FLAGS_DUMMY))
     assert(arena->position + aligned_size <= arena->size && "arena out of space");
   void *p = arena->base + arena->position;
@@ -42,7 +46,7 @@ void *usnd_arena_push(usnd_arena *arena, usnd_size size) {
 }
 
 void *usnd_arena_pop(usnd_arena *arena, usnd_size size) {
-  u32 aligned_size = USND_ALIGN(size, 4);
+  u32 aligned_size = USND_ALIGN(size, USND_ALIGNMENT);
   if (!(arena->flags & USND_ARENA_FLAGS_DUMMY))
     assert((s64)arena->position - aligned_size >= 0 && "arena pos<0");
   arena->position -= aligned_size;
