@@ -573,7 +573,7 @@ static usnd_size UBI_DecodeFrame(usnd_flow *flow,
     produced += UBI_DecodeBlock(flow, channel, hdr->num_channels,
       code_count_b, pcm + produced, hdr->bits_per_sample);
   }
-    
+  
   *subframe_n += 2;
   return produced;
 }

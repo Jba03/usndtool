@@ -68,6 +68,56 @@ static usnd_uuid UUID_GetRandom(void) {
 
 #pragma mark - Common functions
 
+static const char *const GetEventTypeName(usnd_event_type type) {
+  if (type == USND_EVENT_PLAY) return "Play";
+  if (type == USND_EVENT_STOP) return "Stop";
+  if (type == USND_EVENT_PITCH) return "Pitch";
+  if (type == USND_EVENT_VOLUME) return "Volume";
+  if (type == USND_EVENT_EXTRA) return "Extra";
+  if (type == USND_EVENT_STOPALL) return "StopAll";
+  if (type == USND_EVENT_STOP_AND_GO) return "StopAndGo";
+  return "UNKNOWN_EVENT";
+}
+
+static const char *const GetAudioFormatName(usnd_audio_format fmt) {
+  if (fmt == USND_AUDIO_FORMAT_PCM) return "pcm-s16";
+  if (fmt == USND_AUDIO_FORMAT_UBI) return "ubi-adpcm";
+  if (fmt == USND_AUDIO_FORMAT_PSX) return "psx-adpcm";
+  if (fmt == USND_AUDIO_FORMAT_DSP) return "dsp-adpcm";
+  if (fmt == USND_AUDIO_FORMAT_IMA) return "ima-adpcm";
+  if (fmt == USND_AUDIO_FORMAT_MP3) return "mp3";
+  return "UNKNOWN_FORMAT";
+}
+
+static const char *const GetLanguageName(usnd_language lang) {
+  if (lang == USND_LANGUAGE_GERMAN) return "German";
+  if (lang == USND_LANGUAGE_ENGLISH) return "English";
+  if (lang == USND_LANGUAGE_SPANISH) return "Spanish";
+  if (lang == USND_LANGUAGE_FRENCH) return "French";
+  if (lang == USND_LANGUAGE_ITALIAN) return "Italian";
+  return "UNKNOWN_LANGUAGE";
+}
+
+static usnd_language GetLanguageCode(const String s) {
+  if (!SDL_strcmp(s, "German")) return USND_LANGUAGE_GERMAN;
+  if (!SDL_strcmp(s, "English")) return USND_LANGUAGE_ENGLISH;
+  if (!SDL_strcmp(s, "Spanish")) return USND_LANGUAGE_SPANISH;
+  if (!SDL_strcmp(s, "French")) return USND_LANGUAGE_FRENCH;
+  if (!SDL_strcmp(s, "Italian")) return USND_LANGUAGE_ITALIAN;
+  return USND_LANGUAGE_ENGLISH;
+}
+
+const char *const GetVersionName(enum usnd_version version) {
+  if (version == USND_VERSION_PC) return "PC";
+  if (version == USND_VERSION_GC) return "GC";
+  if (version == USND_VERSION_PS2) return "PS2";
+  if (version == USND_VERSION_PS3) return "PS3";
+  if (version == USND_VERSION_XBOX) return "XBOX";
+  if (version == USND_VERSION_XBOX360) return "XBOX 360";
+  return "UNKNOWN_VERSION";
+}
+
+
 static void GetEntryUUID(const usnd_entry *obj, char *string) {
   const u32 lo = USND_UUID_LOW(obj->uuid);
   const u32 hi = USND_UUID_HIGH(obj->uuid);
@@ -91,24 +141,6 @@ static int GetEntryVersion(const usnd_entry *entry) {
   if (usnd_instance_of(entry->type, CWaveFileIdObj))
     return entry->wavefile.version;
   return -1;
-}
-
-static const char* LanguageCode_ToString(usnd_language l) {
-  if (l == USND_LANGUAGE_GERMAN) return "German";
-  if (l == USND_LANGUAGE_ENGLISH) return "English";
-  if (l == USND_LANGUAGE_SPANISH) return "Spanish";
-  if (l == USND_LANGUAGE_FRENCH) return "French";
-  if (l == USND_LANGUAGE_ITALIAN) return "Italian";
-  return "English";
-}
-
-static usnd_language LanguageCode_FromString(const String s) {
-  if (!SDL_strcmp(s, "German")) return USND_LANGUAGE_GERMAN;
-  if (!SDL_strcmp(s, "English")) return USND_LANGUAGE_ENGLISH;
-  if (!SDL_strcmp(s, "Spanish")) return USND_LANGUAGE_SPANISH;
-  if (!SDL_strcmp(s, "French")) return USND_LANGUAGE_FRENCH;
-  if (!SDL_strcmp(s, "Italian")) return USND_LANGUAGE_ITALIAN;
-  return USND_LANGUAGE_ENGLISH;
 }
 
 static bool IsPlayable(const usnd_entry *e) {
@@ -518,6 +550,17 @@ static bool SearchContext_DoSearch(struct SearchContext *s) {
   return true;
 }
 
+#pragma mark -
+
+static bool GetBanksForEntry(usnd_uuid uuid,
+  SoundBank *banks[PROJECT_MAX_BANKS], u32 *count)
+{
+  for (u32 i = 0; i < Project->num_banks; i++)
+    if (SoundBank_Find(Project->banks[i], uuid))
+      banks[(*count)++] = Project->banks[i];
+  return true;
+}
+
 
 #pragma mark - UI -
 
@@ -668,6 +711,55 @@ static bool UI_DrawButton(enum UI_ButtonType type, ImVec2 size, bool active) {
   return true;
 }
 
+static bool UI_ObjectSelector(const char *label,
+  const enum usnd_class *allow, u32 count, usnd_uuid *uuid)
+{
+  String name = {};
+  UUID_ToString(*uuid, name);
+  usnd_entry *entry = Project_Find(Project, *uuid);
+  if (entry)
+    GetEntryName(entry, name);
+  
+  ImVec4 bg_color = ImVec4(0.3f, 0.5f, 1.0f, 0.35f);
+  ImVec4 text_color = ImVec4(0.8f, 0.9f, 1.0f, 1.0f);
+  
+  if (*uuid == USND_INVALID_UUID) bg_color.w *= 0.5f;
+  if (*uuid == USND_INVALID_UUID) text_color.w *= 0.5f;
+  
+  igPushStyleColor_Vec4(ImGuiCol_Button, bg_color);
+  igPushStyleColor_Vec4(ImGuiCol_Text, text_color);
+  bool b = igButton(name, ImVec2(0.0f, 0.0f));
+  igPopStyleColor(2);
+  
+  if (igBeginDragDropTarget()) {
+    for (u32 i = 0; i < count; i++) {
+      const char *name = usnd_class_name(allow[i]);
+      const ImGuiPayload *payload = igAcceptDragDropPayload(name, ImGuiDragDropFlags_None);
+      if (payload && payload->Data) {
+        SDL_Log("Accepted drag drop element (%s)\n", name);
+        usnd_uuid *d = payload->Data;
+        if (*d != *uuid) {
+          *uuid = *d;
+          return true;
+        }
+      }
+    }
+    igEndDragDropTarget();
+  }
+  
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+    igSetMouseCursor(ImGuiMouseCursor_Hand);
+  
+  if (igBeginItemTooltip()) {
+    igText("Accepts:");
+    for (u32 i = 0; i < count; i++)
+      igTextColored(ImVec4(0.6f, 0.75f, 1.0f, 1.0f), " %s", usnd_class_name(allow[i]));
+    igText("Drag & drop/click to select");
+    igEndTooltip();
+  }
+  
+  return b;
+}
 
 static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
 {
@@ -790,6 +882,75 @@ static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection)
   return selected;
 }
 
+#pragma mark - Entry editing
+
+#define UI_ARENA_MAX_SIZE 64000
+/* Arena for temporary edits */
+static usnd_arena UI_Arena;
+
+static char *UI_DupString(char *p, u32 max_size) {
+  void *data = usnd_arena_push(&UI_Arena, max_size);
+  if (p) {
+    u32 len = (u32)SDL_strlen(p);
+    SDL_memcpy(data, p, len + 1);
+  }
+  return data;
+}
+
+static void UI_EditEventResData(usnd_entry *e) {
+  struct CEventResData *evt = &e->resource.event;
+  
+  if (igBeginCombo("Type", GetEventTypeName(evt->type), ImGuiComboFlags_None)) {
+    for (usnd_event_type type = 0; type <= USND_EVENT_STOP_AND_GO; type++) {
+      const char *selection = GetEventTypeName(type);
+      if (igSelectable_Bool(selection, evt->type == type, 0, ImVec2(0.0f, 0.0f))) {
+        evt->type = type;
+      }
+    }
+    igEndCombo();
+  }
+  
+  /* Name */
+  char *name = UI_DupString(e->resource.name, USND_STRING_MAX);
+  igInputTextEx("Name", "No name", name, USND_STRING_MAX,
+    ImVec2(0.0f, 0.0f), ImGuiInputTextFlags_CharsNoBlank, NULL, NULL);
+  if (igIsItemDeactivatedAfterEdit()) {
+    e->resource.name = SDL_strdup(name);
+  }
+  
+  /* Coefficients */
+  igInputFloat4("Coeff", &evt->coeff_a, "%.3f", 0);
+  if (igIsItemDeactivatedAfterEdit()) {
+    if (evt->coeff_a < 0.0f) evt->coeff_a = 0.0f;
+  }
+  
+  const enum usnd_class allow[] = {
+    CWavResData,
+    CProgramResData,
+    CRandomResData,
+    CRandomResData,
+  };
+  
+  UI_ObjectSelector("Link", allow, 4, &evt->link_uuid);
+}
+
+
+static void UI_EditRandomResData(usnd_entry *e) {
+  
+}
+
+static void UI_EditProgramResData(usnd_entry *e) {
+  
+}
+
+static void UI_EditWavResData(usnd_entry *e) {
+  
+}
+
+static void UI_EditWaveFileIdObj(usnd_entry *e) {
+  
+}
+
 
 #pragma mark - UI Panel
 
@@ -831,7 +992,7 @@ static void UI_DrawEntries(void) {
     }
     
     igTextColored(ImVec4(1.0f, 1.0f, 1.0f, 0.5f), "(%d)", search->num_results);
-    if (igIsItemHovered(ImGuiHoveredFlags_None) && Project) {
+    if (igIsItemHovered(ImGuiHoveredFlags_None)) {
       igSetTooltip("%d entries total across banks", Project->num_entries);
     }
     
@@ -848,9 +1009,44 @@ static void UI_DrawEntries(void) {
 }
 
 static void UI_DrawEntryInfo(void) {
-  igBegin("EntryInfo", NULL, ImGuiWindowFlags_None);
-  
+  usnd_entry *e = UI_GetPrimarySelection();
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, ImVec2(5,5));
+  if (igBegin("EntryInfo", NULL, ImGuiWindowFlags_None) && Project && e) {
+    ImVec4 color0 = UI_GetEntryColor(e);
+    ImVec4 color1 = color0;
+    ImVec4 color2 = color0;
+    color0.w = 1.0f;
+    color1.w = 0.85f;
+    color2.w = 0.7f;
+      
+    String uuid = {};
+    GetEntryUUID(e, uuid);
+    igTextColored(color0, uuid);
+    igTextColored(color1, "%s", usnd_class_name(e->type));
+
+    int version = GetEntryVersion(e);
+    if (version != -1) {
+      color1.w *= 0.5f;
+      igSameLine(0.0f, 5.0f);
+      igTextColored(color1, "(v%d)", version);
+    }
+      
+    igSeparator();
+    
+    enum usnd_class type = usnd_general_class(e->type);
+    if (type == CEventResData)
+      UI_EditEventResData(e);
+    else if (type == CRandomResData)
+      UI_EditRandomResData(e);
+    else if (type == CProgramResData)
+      UI_EditProgramResData(e);
+    else if (type == CWavResData)
+      UI_EditWavResData(e);
+    else if (type == CWaveFileIdObj)
+      UI_EditWaveFileIdObj(e);
+  }
   igEnd();
+  igPopStyleVar(1);
 }
 
 static void UI_DrawEntryTree(void) {
@@ -1073,6 +1269,8 @@ static void UI_Draw(void) {
   igPopStyleVar(3);
   
   UI_HandleGlobalShortcuts();
+  /* Clear temporary edits */
+  usnd_arena_clear(&UI_Arena);
 }
 
 static bool UI_Init(void) {
@@ -1082,7 +1280,15 @@ static bool UI_Init(void) {
   UI_FixedSearch.class_flags |= (1 << CRTTIClass);
   SearchContext_DoSearch(&UI_FixedSearch);
   
+  UI_Arena.size = UI_ARENA_MAX_SIZE;
+  UI_Arena.base = SDL_malloc(UI_ARENA_MAX_SIZE);
+  UI_Arena.position = 0;
+  
   return true;
+}
+
+static bool UI_Deinit(void) {
+  SDL_free(UI_Arena.base);
 }
   
 #pragma mark - Application
@@ -1126,7 +1332,7 @@ SDL_AppResult SDL_AppInit(void **state, int argc, char **argv) {
   ImGui_ImplSDLRenderer3_Init(Renderer);
     
   if (!UI_Init()) {
-    SDL_Log("UI failed to initialize\n");
+    SDL_Log("UI initialization failed\n");
     return SDL_APP_FAILURE;
   }
   
@@ -1176,6 +1382,7 @@ SDL_AppResult SDL_AppIterate(void *state) {
 }
 
 void SDL_AppQuit(void *state, SDL_AppResult result) {
+  UI_Deinit();
   ImGui_ImplSDL3_Shutdown();
   SDL_DestroyRenderer(Renderer);
   SDL_DestroyWindow(Window);

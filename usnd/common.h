@@ -69,13 +69,25 @@ enum usnd_class {
   USND_CLASS_MAX
 };
 
+enum usnd_version {
+  USND_VERSION_PC,
+  USND_VERSION_GC,
+  USND_VERSION_PS2,
+  USND_VERSION_PS3,
+  USND_VERSION_XBOX,
+  USND_VERSION_XBOX360,
+  USND_VERSION_UNKNOWN,
+};
+
+usnd_endian usnd_version_endianness(enum usnd_version);
+
 typedef u64 usnd_uuid;
 #define USND_INVALID_UUID 0
 #define USND_UUID_LOW(u) ((u) & 0xFFFFFFFF)
 #define USND_UUID_HIGH(u) ((u) >> 32)
 /* Get the group of a UUID, which is the high part
  * of the UUID's low part, e.g. 00000001xxxx00A3 */
-#define USND_UUID_GROUP(u) (USND_UUID_LOW(u)>>16)
+#define USND_UUID_GROUP(u) (USND_UUID_LOW(u) >> 16)
 #define USND_UUID_MAX_GROUPS 0xFFFF
 /* Hardcoded UUIDs for ThemeProgram and ThemeActor */
 #define USND_THEMEPROGRAM_UUID 0x2ACA41B9C9138EA1
@@ -124,6 +136,11 @@ typedef u32 usnd_language;
 #define USND_LANGUAGE_SPANISH 0x65732020 /* 'es  ' */
 #define USND_LANGUAGE_FRENCH  0x66722020 /* 'fr  ' */
 #define USND_LANGUAGE_ITALIAN 0x69742020 /* 'it  ' */
+
+const char *const usnd_event_type_name(usnd_event_type);
+const char *const usnd_audio_format_name(usnd_audio_format);
+const char *const usnd_language_name(usnd_language);
+const char *const usnd_version_name(enum usnd_version);
 
 #pragma mark - Memory
 

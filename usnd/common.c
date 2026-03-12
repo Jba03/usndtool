@@ -140,3 +140,15 @@ int S_uuid(usnd_flow *flow, usnd_uuid *uuid) {
   memcpy(uuid, &tmp, sizeof(tmp));
   return 1;
 }
+
+#pragma mark -
+
+usnd_endian usnd_version_endianness(enum usnd_version version) {
+  if (version == USND_VERSION_PC) return USND_LITTLE_ENDIAN;
+  if (version == USND_VERSION_GC) return USND_BIG_ENDIAN;
+  if (version == USND_VERSION_PS2) return USND_LITTLE_ENDIAN;
+  if (version == USND_VERSION_PS3) return USND_BIG_ENDIAN;
+  if (version == USND_VERSION_XBOX) return USND_LITTLE_ENDIAN;
+  if (version == USND_VERSION_XBOX360) return USND_BIG_ENDIAN;
+  return USND_LITTLE_ENDIAN;
+}
