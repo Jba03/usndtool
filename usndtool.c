@@ -573,6 +573,8 @@ static struct SearchContext UI_PopupSearch;
 static ImGuiID UI_MainDockspaceID;
 static bool UI_WantsLayout = true;
 
+static ImVec4 UI_VisualizerColor = ImVec4(60/255.0f, 200/255.0f, 255/255.0f, 2/255.0f);
+
 /* Global shortcuts */
 static const ImGuiKeyChord UI_UndoKeyChord = ImGuiMod_Ctrl | ImGuiKey_Z;
 static const ImGuiKeyChord UI_RedoKeyChord = ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z;
@@ -1236,9 +1238,37 @@ static void UI_DrawEntryTree(void) {
 }
 
 static void UI_DrawAudioPlayer(void) {
-  igBegin("AudioPlayer", NULL, ImGuiWindowFlags_None);
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+  igPushStyleVar_Vec2(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+  igBegin("AudioPlayer", NULL, ImGuiWindowFlags_NoScrollbar);
+  
+  ImVec2 base = igGetCursorScreenPos();
+  ImVec2 avail = igGetContentRegionAvail();
+  ImDrawList *drawlist = igGetWindowDrawList();
+  
+  if (Opt_DrawVisualizer) {
+    /* A slight inner border for the skeuomorphic experience */
+    ImDrawList_AddRect(drawlist, base, ImVec2(base.x + avail.x, base.y + avail.y),
+      0xA0000000, 0.0f, ImDrawFlags_None, 2.0f);
+
+    float time = igGetTime();
+    float energy = 0.0f;
+    float scale = 1.0f + SDL_min(energy, 1.5f) * 0.35f;
+    
+    ImU32 color = igGetColorU32_Vec4(UI_VisualizerColor);
+    for (u32 i = 0; i < 256; i++) {
+      float fx = i * 12.9898f, fy = i * 78.233f;
+      float speed = SDL_sinf(fx) * 0.5f + 0.5f;
+      float x = base.x + (0.5f + SDL_sinf(time * 0.05f * (0.2f + speed) + fx) * 0.5f) * avail.x;
+      float y = base.y + (0.5f + SDL_cosf(time * 0.04f * (0.3f + speed) + fy) * 0.5f) * avail.y;
+      float r = 30.0f + 25.0f * (0.5f + SDL_sinf(time * 0.2f + fx * 0.1f) * 0.5f);
+      ImDrawList_AddCircleFilled(drawlist, (ImVec2){x, y}, r * scale, color, 10);
+    }
+  }
   
   igEnd();
+  igPopStyleVar(1);
+  igPopStyleVar(1);
 }
 
 static void UI_DrawPlaybackControls(void) {
