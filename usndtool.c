@@ -17,8 +17,7 @@
 #include "usnd/usnd.h"
 #include "usnd/audio.h"
 
-#define STRING_MAX USND_STRING_MAX
-typedef char String[STRING_MAX];
+typedef char String[USND_STRING_MAX];
 
 #define PATH_MAX 1024
 typedef char Path[PATH_MAX];
@@ -34,7 +33,7 @@ static bool Opt_DrawVisualizer = true;
 static bool Opt_DrawSyncMarkers = true;
 static bool Opt_DrawDebugger = false;
 static bool Opt_DrawTimeline = false;
-static bool Opt_CompactUUIDs = true;
+static bool Opt_CompactUUIDs = false;
 
 /* Audio options */
 static float Opt_AudioMasterGain = 1.0f;
@@ -107,7 +106,7 @@ static usnd_language GetLanguageCode(const String s) {
   return USND_LANGUAGE_ENGLISH;
 }
 
-const char *const GetVersionName(enum usnd_version version) {
+static const char *const GetVersionName(enum usnd_version version) {
   if (version == USND_VERSION_PC) return "PC";
   if (version == USND_VERSION_GC) return "GC";
   if (version == USND_VERSION_PS2) return "PS2";
@@ -187,7 +186,7 @@ static bool Path_GetFilename(const Path path, String name) {
   const char *p1 = SDL_strrchr(path, '.');
   if (!p0 || !p1)
     return false;
-  SDL_strlcpy(name, p0+1, SDL_max(p1-p0-1, STRING_MAX-1));
+  SDL_strlcpy(name, p0+1, SDL_max(p1-p0-1, USND_STRING_MAX-1));
   return true;
 }
 
@@ -450,8 +449,7 @@ static struct Project* Project_LoadFromSoundFolder(const Path dir) {
   }
   
   SDL_free(files);
-  
-  SDL_strlcpy(project->name, "DefaultProject", STRING_MAX);
+  SDL_strlcpy(project->name, "DefaultProject", USND_STRING_MAX);
   
   return project;
 }
@@ -522,10 +520,8 @@ static bool SearchContext_DoSearch(struct SearchContext *s) {
   
   Project_ForEach(Project, entry) {
     if (SearchFilter(s, entry)) {
-      String name = {};
-      String uuid = {};
-      String split_uuid = {};
       /* Test name + default and split uuid formats */
+      String name = {}, uuid = {}, split_uuid = {};
       GetEntryName(entry, name);
       GetEntryUUID(entry, split_uuid);
       UUID_ToString(entry->uuid, uuid);
@@ -551,9 +547,7 @@ static bool SearchContext_DoSearch(struct SearchContext *s) {
 
 #pragma mark -
 
-static bool GetBanksForEntry(usnd_uuid uuid,
-  SoundBank *banks[PROJECT_MAX_BANKS], u32 *count)
-{
+static bool GetBanksForEntry(usnd_uuid uuid, SoundBank *banks[PROJECT_MAX_BANKS], u32 *count) {
   for (u32 i = 0; i < Project->num_banks; i++)
     if (SoundBank_Find(Project->banks[i], uuid))
       banks[(*count)++] = Project->banks[i];
@@ -936,6 +930,114 @@ static bool UI_DrawEntryTable(struct SearchContext *s, usnd_entry **selection) {
   return selected;
 }
 
+static void UI_ObjectTree(usnd_entry *e, u32 depth, String info) {
+  ImGuiTableFlags flags = 0;
+  flags |= ImGuiTreeNodeFlags_DefaultOpen;
+  flags |= ImGuiTreeNodeFlags_SpanFullWidth;
+  flags |= ImGuiTreeNodeFlags_SpanAllColumns;
+  flags |= ImGuiTreeNodeFlags_OpenOnArrow;
+
+  igPushID_Ptr(e);
+  igTableNextColumn();
+  igSetCursorPosX(igGetCursorPosX() + depth * 5.0f);
+  
+
+  
+  u32 num_next = 0;
+  usnd_entry *next[USND_MAX_LINKS] = {};
+  String info_next[USND_MAX_LINKS] = {};
+  
+  String name = {};
+  GetEntryName(e, name);
+  
+  ImVec4 color = UI_GetEntryColor(e);
+  if (e == UI_GetPrimarySelection())
+    color = ImVec4(1.0f, 0.75f, 0.3f, 1.0f);
+  igPushStyleColor_Vec4(ImGuiCol_Text, color);
+  
+  const struct CWavResData *wav = &e->resource.wav;
+  const struct CEventResData *evt = &e->resource.event;
+  const struct CRandomResData *random = &e->resource.random;
+  const struct CProgramResData *program = &e->resource.program;
+  const struct CSwitchResData *_switch = &e->resource._switch;
+  
+  if (igTreeNodeEx_Str(name, flags)) {
+    switch (usnd_general_class(e->type)) {
+      case CEventResData:
+        next[num_next] = Project_Find(Project, evt->link_uuid);
+        SDL_strlcpy(info_next[num_next++], "--", USND_STRING_MAX);
+        break;
+        
+      case CRandomResData:
+        SDL_snprintf(info, USND_STRING_MAX, "f=%.3f", random->fail_probability);
+        for (u32 i = 0; i < random->num_elements; i++) {
+          next[num_next] = Project_Find(Project, random->elements[i].uuid);
+          SDL_snprintf(info_next[num_next++], USND_STRING_MAX, "p=%.3f", random->elements[i].probability);
+        }
+        break;
+      
+      case CProgramResData:
+        for (u32 i = 0; i < program->num_links; i++)
+          next[num_next++] = Project_Find(Project, program->links[i]);
+        break;
+        
+      case CSwitchResData:
+        for (u32 i = 0; i < _switch->num_elements; i++) {
+          next[num_next] = Project_Find(Project, _switch->elements[i].uuid);
+          SDL_snprintf(info_next[num_next++], USND_STRING_MAX, "%d", _switch->elements[i].index);
+        }
+        break;
+        
+      case CWavResData:
+        if ((next[num_next] = Project_Find(Project, wav->default_link)))
+          SDL_strlcpy(info_next[num_next++], "Default", USND_STRING_MAX);
+        for (u32 i = 0; i < wav->num_links; i++) {
+          next[num_next] = Project_Find(Project, wav->links[i].uuid);
+          SDL_strlcpy(info_next[num_next++], GetLanguageName(wav->links[i].language), USND_STRING_MAX);
+        }
+        break;
+        
+      default:
+        break;
+    }
+    
+    igTreePop();
+  }
+  
+  
+  igPopStyleColor(1);
+  
+  if (igIsItemHovered(ImGuiHoveredFlags_None))
+    igSetMouseCursor(ImGuiMouseCursor_Hand);
+  
+  if (igIsItemClicked(ImGuiMouseButton_Left)) {
+    UI_Selection[1] = e;
+    if (igIsMouseDoubleClicked_Nil(ImGuiMouseButton_Left)) {
+      /* play object */
+    }
+  }
+  
+  if (igIsItemClicked(ImGuiMouseButton_Right))
+    UI_ContextMenuTarget = e;
+  
+  /* class name */
+  igTableNextColumn();
+  igTextDisabled("%s", usnd_class_name(e->type));
+  
+  /* info */
+  igTableNextColumn();
+  igTextDisabled("%s", info);
+  
+  for (u32 i = 0; i < num_next; i++) {
+    igTableNextRow(ImGuiTableRowFlags_None, 0);
+    if (next[i])
+      UI_ObjectTree(next[i], depth + 1, info_next[i]);
+  }
+  
+  igPopID();
+}
+
+
 #pragma mark - Entry editing
 
 #define UI_ARENA_MAX_SIZE 64000
@@ -1106,9 +1208,31 @@ static void UI_DrawEntryInfo(void) {
 }
 
 static void UI_DrawEntryTree(void) {
-  igBegin("EntryTree", NULL, ImGuiWindowFlags_None);
+  ImGuiWindowFlags flags = 0;
+  flags |= ImGuiWindowFlags_NoMove;
+  flags |= ImGuiWindowFlags_NoScrollbar;
+  flags |= ImGuiWindowFlags_NoScrollWithMouse;
   
+  igPushStyleVar_Vec2(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+  if (igBegin("EntryTree", NULL, flags) && Project && UI_Selection[0]) {
+    ImGuiTableFlags flags = 0;
+    flags |= ImGuiTableFlags_BordersInnerV;
+    flags |= ImGuiTableFlags_Resizable;
+    flags |= ImGuiTableFlags_ScrollY;
+    flags |= ImGuiTableFlags_RowBg;
+    flags |= ImGuiTableFlags_NoBordersInBody;
+    
+    if (igBeginTable("Entries", 3, flags, ImVec2(0.0f, 0.0f), 0.0f)) {
+      igTableSetupColumn("Name/UUID", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+      igTableSetupColumn("Class", ImGuiTableColumnFlags_WidthFixed, 115.0f, 0);
+      igTableSetupColumn("Info", ImGuiTableColumnFlags_WidthFixed, 55.0f, 0);
+      igTableHeadersRow();
+      UI_ObjectTree(UI_Selection[0], 0, "--");
+      igEndTable();
+    }
+  }
   igEnd();
+  igPopStyleVar(1);
 }
 
 static void UI_DrawAudioPlayer(void) {

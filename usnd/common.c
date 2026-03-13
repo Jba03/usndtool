@@ -1,7 +1,6 @@
 #include "common.h"
 
 #include <assert.h>
-#include <stdalign.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -24,10 +23,10 @@ usnd_endian usnd_test_endian(const u32 *data, u32 maxval) {
 
 #pragma mark - Memory
 
-#define USND_ARENA_GROWTH_FACTOR 1.2f
 #define USND_ALIGN(size, x) ((size) + ((x) - (size) % (x)) % (x))
-
-static const usnd_size USND_ALIGNMENT = alignof(intmax_t);
+/* stdalign.h is not available in C99, so this will have to do */
+#define alignof(type) offsetof(struct { char c; type t; }, t)
+static const usnd_size USND_ALIGNMENT = alignof(uintmax_t);
 
 void *usnd_arena_push(usnd_arena *arena, usnd_size size) {
   u32 aligned_size = USND_ALIGN(size, USND_ALIGNMENT);
